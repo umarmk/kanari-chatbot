@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useChats } from '../store/chats';
 import { useAuth } from '../store/auth';
-import { API_BASE } from '../lib/api';
+import { API_BASE, api } from '../lib/api';
 import { log } from '../lib/logger';
+
+
+interface Chat { id: string; projectId: string; }
 
 export default function ChatView() {
   const { chatId } = useParams();
@@ -16,23 +19,52 @@ export default function ChatView() {
   const lastPromptRef = useRef<string>('');
   const { accessToken } = useAuth();
   const abortRef = useRef<AbortController | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [noOutput, setNoOutput] = useState(false);
+  const gotTokensRef = useRef(false);
+
+  // For chat-level file upload
+  const [projectId, setProjectId] = useState<string | null>(null);
+  const [pendingFileName, setPendingFileName] = useState<string | null>(null);
+  const [pendingPreviewUrl, setPendingPreviewUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [projectModel, setProjectModel] = useState<string | null>(null);
+  const [openrouterKey, setOpenrouterKey] = useState<string | null>(null);
+
+  useEffect(() => { if (textareaRef.current) textareaRef.current.focus(); }, [chatId]);
 
   useEffect(() => {
-    if (chatId) loadMessages(chatId);
+    if (!chatId) return;
+    loadMessages(chatId);
+    api.get(`/chats/${chatId}`).then((res)=> setProjectId((res.data as Chat).projectId)).catch(()=>{});
   }, [chatId, loadMessages]);
 
-  const canSend = useMemo(() => !!input.trim() && !!chatId && !streaming, [input, chatId, streaming]);
+  useEffect(() => {
+    if (!projectId) return;
+    api.get(`/projects/${projectId}`).then((res) => {
+      setProjectModel(res.data?.model || null);
+      try { setOpenrouterKey(localStorage.getItem(`openrouterKey:${projectId}`)); } catch {}
+    }).catch(()=>{});
+  }, [projectId]);
+
+  const isPaid = useMemo(() => !!projectModel && !projectModel.endsWith(':free'), [projectModel]);
+  const canSend = useMemo(() => !!input.trim() && !!chatId && !streaming && (!isPaid || !!openrouterKey), [input, chatId, streaming, isPaid, openrouterKey]);
+
+
 
   async function startStream(content: string) {
     if (!chatId) return;
     setLastError(null);
+    setNoOutput(false);
+    gotTokensRef.current = false;
     setHasTokens(false);
     lastPromptRef.current = content;
     setStreaming(true);
     log.info('ui.chat.send', { chatId });
 
     // Show the user message immediately and an assistant placeholder
-    addMessage(chatId, { id: 'tmp-user', role: 'user', content, createdAt: new Date().toISOString() } as any);
+    const userContent = pendingFileName ? `${content}\n\n(Attached: ${pendingFileName})` : content;
+    addMessage(chatId, { id: 'tmp-user', role: 'user', content: userContent, createdAt: new Date().toISOString() } as any);
     upsertAssistantStreaming(chatId, '');
 
     const url = `${API_BASE}/chats/${chatId}/stream?content=${encodeURIComponent(content)}`;
@@ -40,7 +72,9 @@ export default function ChatView() {
     abortRef.current = ctrl;
 
     try {
-      const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}`, Accept: 'text/event-stream' }, signal: ctrl.signal });
+      const headers: any = { Authorization: `Bearer ${accessToken}`, Accept: 'text/event-stream' };
+      if (openrouterKey) headers['x-openrouter-key'] = openrouterKey;
+      const resp = await fetch(url, { headers, signal: ctrl.signal });
       if (!resp.ok || !resp.body) throw new Error('stream_failed');
       const reader = (resp.body as any).getReader?.();
       const decoder = new TextDecoder('utf-8');
@@ -58,14 +92,31 @@ export default function ChatView() {
           const data = line.slice(5).trim();
           if (data === '[DONE]') break;
           try {
-            const json = JSON.parse(data);
-            const delta = json?.choices?.[0]?.delta?.content || json?.choices?.[0]?.message?.content || '';
-            if (delta) {
-              acc += delta;
+            const parsed = JSON.parse(data);
+            let frag = '' as any;
+            if (typeof parsed === 'string') {
+              frag = parsed;
+            } else {
+              const choice = parsed?.choices?.[0] || {};
+              frag = choice?.delta?.content || choice?.message?.content || choice?.content || '';
+            }
+            if (frag) {
+              acc += String(frag);
+              gotTokensRef.current = true;
               setHasTokens(true);
               upsertAssistantStreaming(chatId, acc);
             }
-          } catch {}
+          } catch {
+            // Fallback: treat as raw string (may be already JSON-stringified by SSE)
+            let frag = data;
+            try { if (data.startsWith('"')) frag = JSON.parse(data); } catch {}
+            if (frag) {
+              acc += String(frag);
+              gotTokensRef.current = true;
+              setHasTokens(true);
+              upsertAssistantStreaming(chatId, acc);
+            }
+          }
         }
       }
     } catch (e: any) {
@@ -74,10 +125,16 @@ export default function ChatView() {
     } finally {
       setStreaming(false);
       abortRef.current = null;
+      if (!gotTokensRef.current) setNoOutput(true); else setNoOutput(false);
       // refresh persisted messages
       if (chatId) loadMessages(chatId);
       log.info('ui.chat.stream_end', { chatId });
+      // clear pending file after send
+      setPendingFileName(null);
+      if (pendingPreviewUrl) { URL.revokeObjectURL(pendingPreviewUrl); setPendingPreviewUrl(null); }
+
     }
+
   }
 
   async function onSend(e: React.FormEvent) {
@@ -86,6 +143,34 @@ export default function ChatView() {
     const content = input.trim();
     setInput('');
     await startStream(content);
+  }
+
+  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f || !projectId) return;
+    setUploading(true); setLastError(null);
+    try {
+      if (f.type.startsWith('image/')) setPendingPreviewUrl(URL.createObjectURL(f));
+      setPendingFileName(f.name);
+      const form = new FormData();
+      form.append('file', f);
+      await api.post('/files', form, { params: { project_id: projectId }, headers: { 'Content-Type': 'multipart/form-data' } });
+      log.info('ui.chat.file_uploaded', { name: f.name, size: f.size });
+    } catch (err: any) {
+      setPendingFileName(null);
+      if (pendingPreviewUrl) { URL.revokeObjectURL(pendingPreviewUrl); setPendingPreviewUrl(null); }
+
+      const raw = err?.response?.data?.message || err?.message || '';
+      let msg = 'File upload failed';
+      const lower = String(raw).toLowerCase();
+      if (raw === 'unsupported_file_type') msg = 'Unsupported file type. Allowed: text, JSON, XML, JS/TS, PDF, images (images not used in context).';
+      else if (lower.includes('file too large') || err?.response?.status === 413) msg = 'File too large (limit 20 MB).';
+      else if (raw) msg = raw;
+      setLastError(msg);
+    } finally {
+      setUploading(false);
+      e.target.value = '';
+    }
   }
 
   return (
@@ -103,6 +188,22 @@ export default function ChatView() {
         ))}
         {!msgs.length && <div className="text-center text-gray-500">No messages yet. Say hello!</div>}
       </div>
+      {(pendingFileName || pendingPreviewUrl) && (
+        <div className="px-4 pb-2">
+          <div className="flex items-center gap-3 border rounded p-2 bg-gray-50">
+            {pendingPreviewUrl && (
+              <img src={pendingPreviewUrl} alt="preview" className="w-12 h-12 object-cover rounded border" />
+            )}
+
+            <div className="flex-1 text-sm text-gray-700 truncate">{pendingFileName}</div>
+            <button type="button" className="text-xs text-gray-700 underline"
+              onClick={() => { setPendingFileName(null); if (pendingPreviewUrl) { URL.revokeObjectURL(pendingPreviewUrl); setPendingPreviewUrl(null); } }}>
+              Remove
+            </button>
+          </div>
+        </div>
+      )}
+
       <form onSubmit={onSend} className="p-4 border-t bg-white">
         {lastError && (
           <div className="mb-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1 flex items-center justify-between">
@@ -110,8 +211,27 @@ export default function ChatView() {
             <button type="button" className="text-red-800 underline" onClick={() => startStream(lastPromptRef.current)}>Retry</button>
           </div>
         )}
+        {noOutput && !lastError && (
+          <div className="mb-2 text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded px-2 py-1 flex items-center justify-between">
+            <span>No response received. Try again or rephrase.</span>
+            <button type="button" className="text-gray-800 underline" onClick={() => setNoOutput(false)}>Dismiss</button>
+          </div>
+        )}
+        {isPaid && !openrouterKey && (
+          <div className="mb-2 text-xs text-yellow-800 bg-yellow-50 border border-yellow-200 rounded px-2 py-1">
+            Paid model selected. Add your OpenRouter API key in project settings to enable sending. {projectId && (<Link to={`/projects/${projectId}`} className="underline">Open settings</Link>)}.
+          </div>
+        )}
         <div className="flex gap-2 items-end">
+          <label className="self-end">
+            <span className="inline-flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded px-3 py-2 text-sm cursor-pointer">
+              {uploading ? 'Uploading…' : 'Attach'}
+            </span>
+            <input type="file" onChange={onPickFile} disabled={!projectId || uploading || streaming} className="hidden" />
+          </label>
+
           <textarea
+            ref={textareaRef}
             className="flex-1 border rounded px-3 py-2 text-sm h-24"
             placeholder="Message..."
             value={input}
@@ -119,6 +239,13 @@ export default function ChatView() {
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); (e.currentTarget.form as any)?.requestSubmit(); } }}
             disabled={streaming}
           />
+
+          {!streaming && (
+            <button type="button" className="bg-gray-100 hover:bg-gray-200 text-black rounded px-3 py-2 text-sm" onClick={() => { setInput(''); setPendingFileName(null); if (pendingPreviewUrl) { URL.revokeObjectURL(pendingPreviewUrl); setPendingPreviewUrl(null); } }}>
+              Clear
+            </button>
+          )}
+
           {streaming ? (
             <div className="flex items-center gap-2 self-end">
               <span className={`text-xs text-gray-600 ${hasTokens ? '' : 'animate-pulse'}`}>{hasTokens ? 'Streaming…' : 'Waiting for response…'}</span>
