@@ -16,6 +16,8 @@ model User {
   sessions      Session[]
   projects      Project[]
   files         File[]
+  chats         Chat[]
+  messages      Message[]
 }
 
 model OauthAccount {
@@ -54,8 +56,9 @@ model Project {
   params       Json?
   createdAt    DateTime  @default(now())
 
-  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  files File[]
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  files  File[]
+  chats  Chat[]
 
   @@index([userId])
 }
@@ -74,6 +77,38 @@ model File {
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
+  @@index([userId])
+}
+
+model Chat {
+  id        String   @id @default(uuid()) @db.Uuid
+  projectId String   @db.Uuid
+  userId    String   @db.Uuid
+  title     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([projectId])
+  @@index([userId])
+}
+
+model Message {
+  id        String   @id @default(uuid()) @db.Uuid
+  chatId    String   @db.Uuid
+  userId    String   @db.Uuid
+  role      String
+  content   String
+  createdAt DateTime @default(now())
+  meta      Json?
+
+  chat Chat @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([chatId])
   @@index([userId])
 }
 

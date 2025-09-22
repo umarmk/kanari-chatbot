@@ -9,6 +9,7 @@ import { ConfigModule } from '@nestjs/config';
 import Joi from 'joi';
 import { ProjectsModule } from './projects/projects.module';
 import { FilesModule } from './files/files.module';
+import { ChatsModule } from './chats/chats.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { FilesModule } from './files/files.module';
         GOOGLE_CLIENT_SECRET: Joi.string().optional(),
         SESSION_SIGNING_KEY: Joi.string().optional(),
         PORT: Joi.string().optional(),
+        OPENROUTER_API_KEY: Joi.string().optional(),
       }),
     }),
     ThrottlerModule.forRoot([{ ttl: 60, limit: 100 }]),
@@ -29,6 +31,7 @@ import { FilesModule } from './files/files.module';
     AuthModule,
     ProjectsModule,
     FilesModule,
+    ChatsModule,
   ],
   controllers: [AppController],
   providers: [

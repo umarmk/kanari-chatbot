@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../store/auth';
 import { log } from '../lib/logger';
 import { useProjects } from '../store/projects';
+import { useChats } from '../store/chats';
 
 export default function Layout() {
   const nav = useNavigate();
@@ -12,9 +13,12 @@ export default function Layout() {
   const refreshToken = useAuth((s) => s.refreshToken);
 
   const { projects, loading, error, load, add } = useProjects();
+  const { chatsByProject, loadChats, createChat } = useChats();
   const [newName, setNewName] = useState('');
 
   useEffect(() => { load(); }, [load]);
+  const activeProjectId = (loc.pathname.match(/\/projects\/([^\/]+)/)?.[1]) || '';
+  useEffect(() => { if (activeProjectId) loadChats(activeProjectId); }, [activeProjectId, loadChats]);
 
   async function onCreateProject(e: React.FormEvent) {
     e.preventDefault(); if (!newName.trim()) return;
@@ -57,18 +61,77 @@ export default function Layout() {
           {loading ? (
             <div className="px-3 py-2 text-sm">Loading…</div>
           ) : (
-            <ul>
+            <ul className="list-none m-0 p-0">
               {projects.map((p) => {
                 const active = loc.pathname.includes(p.id);
                 return (
                   <li key={p.id}>
-                    <Link
-                      to={`/projects/${p.id}`}
-                      onClick={() => log.info('ui.sidebar.project_selected', { id: p.id })}
-                      className={`block px-3 py-2 text-sm truncate ${active ? 'bg-yellow-100' : 'hover:bg-yellow-50'}`}
-                    >
-                      {p.name}
-                    </Link>
+                    <div className="flex flex-col">
+                      <Link
+                        to={`/projects/${p.id}`}
+                        onClick={() => log.info('ui.sidebar.project_selected', { id: p.id })}
+                        className={`block px-3 py-2 text-sm truncate no-underline ${active ? 'bg-yellow-100' : 'hover:bg-yellow-50'}`}
+                      >
+                        {p.name}
+                      </Link>
+                      {active && (
+                        <div className="pl-2 pb-2">
+                          <div className="flex items-center justify-between pr-3">
+                            <div className="text-xs uppercase text-gray-500">Chats</div>
+                            <button
+                              className="text-xs text-blue-700 hover:underline"
+                              onClick={async () => {
+                                const created = await createChat(p.id, 'New Chat');
+                                nav(`/projects/${p.id}/chats/${created.id}`);
+                              }}
+                            >New</button>
+                          </div>
+                          <ul className="mt-1 list-none m-0 p-0 space-y-1">
+                            {(chatsByProject[p.id]||[]).map((c) => {
+                              const chatActive = loc.pathname.includes(`/chats/${c.id}`);
+                              return (
+                                <li key={c.id} className="group">
+                                  <div className="flex items-center">
+                                    <Link to={`/projects/${p.id}/chats/${c.id}`} className={`flex-1 block px-3 py-1 text-sm truncate no-underline ${chatActive ? 'bg-yellow-50' : 'hover:bg-yellow-50'}`}>{c.title || 'Untitled'}</Link>
+                                    <button
+                                      className="ml-1 text-xs text-gray-600 hover:text-gray-900 opacity-0 group-hover:opacity-100"
+                                      title="Rename"
+                                      onClick={async (e) => {
+                                        e.preventDefault();
+                                        const name = prompt('Rename chat', c.title || 'Untitled');
+                                        if (name != null) {
+                                          try {
+                                            await api.patch(`/chats/${c.id}`, { title: name || 'Untitled' });
+                                            // naive refresh
+                                            loadChats(p.id);
+                                          } catch {}
+                                        }
+                                      }}
+                                    >✎</button>
+                                    <button
+                                      className="ml-1 text-xs text-red-600 hover:text-red-800 opacity-0 group-hover:opacity-100"
+                                      title="Delete"
+                                      onClick={async (e) => {
+                                        e.preventDefault();
+                                        if (!confirm('Delete this chat?')) return;
+                                        try {
+                                          await api.delete(`/chats/${c.id}`);
+                                          loadChats(p.id);
+                                          if (loc.pathname.includes(`/chats/${c.id}`)) nav(`/projects/${p.id}`);
+                                        } catch {}
+                                      }}
+                                    >✕</button>
+                                  </div>
+                                </li>
+                              );
+                            })}
+                            {(!chatsByProject[p.id] || chatsByProject[p.id].length===0) && (
+                              <li className="px-3 py-1 text-xs text-gray-500">No chats</li>
+                            )}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
                   </li>
                 );
               })}
@@ -84,7 +147,7 @@ export default function Layout() {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 min-w-0">
+      <main className="flex-1 min-w-0 flex flex-col h-screen">
         <Outlet />
       </main>
     </div>
