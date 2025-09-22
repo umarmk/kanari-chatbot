@@ -1,9 +1,10 @@
-import { Body, Controller, Delete, Get, HttpException, HttpStatus, Param, Post, Query, Sse, UseGuards, Patch } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Headers, HttpException, HttpStatus, Param, Post, Query, Sse, UseGuards, Patch } from '@nestjs/common';
 import { IsOptional, IsString } from 'class-validator';
 import { ChatsService } from './chats.service';
 import { JwtAuthGuard } from '../common/jwt-auth.guard';
 import { UserId } from '../common/user.decorator';
 import { Observable } from 'rxjs';
+import { Throttle } from '@nestjs/throttler';
 
 class CreateChatDto { @IsOptional() @IsString() title?: string }
 class UpdateChatDto { @IsOptional() @IsString() title?: string }
@@ -53,10 +54,16 @@ export class ChatsController {
   }
 
   // SSE streaming (GET with content query to keep it simple)
+  @Throttle({ default: { limit: 20, ttl: 60000 } }) // per-user/IP limit for streaming
   @Sse('chats/:id/stream')
-  stream(@UserId() userId: string, @Param('id') id: string, @Query('content') content: string): Observable<MessageEvent> {
+  stream(
+    @UserId() userId: string,
+    @Param('id') id: string,
+    @Query('content') content: string,
+    @Headers('x-openrouter-key') openrouterKey?: string,
+  ): Observable<MessageEvent> {
     if (!content) throw new HttpException('content_required', HttpStatus.BAD_REQUEST);
-    return this.svc.streamAssistantReply(userId, id, content);
+    return this.svc.streamAssistantReply(userId, id, content, openrouterKey);
   }
 }
 

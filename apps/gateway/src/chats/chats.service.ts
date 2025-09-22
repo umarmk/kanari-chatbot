@@ -1,11 +1,23 @@
 import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Observable } from 'rxjs';
+import { ContextService } from './context.service';
+
+const FREE_MODELS = new Set<string>([
+  'x-ai/grok-4-fast:free',
+  'deepseek/deepseek-chat-v3.1:free',
+  'google/gemini-2.0-flash-exp:free',
+]);
+const PAID_MODELS = new Set<string>([
+  'google/gemini-2.5-flash-lite',
+  'google/gemini-2.0-flash-lite-001',
+  'openai/gpt-5-nano',
+]);
 
 @Injectable()
 export class ChatsService {
   private readonly logger = new Logger('ChatsService');
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private readonly context: ContextService) {}
 
   async ensureProjectOwnership(userId: string, projectId: string) {
     const project = await this.prisma.project.findFirst({ where: { id: projectId, userId } });
@@ -49,7 +61,7 @@ export class ChatsService {
   }
 
   // SSE streaming via OpenRouter (falls back to stub if no key)
-  streamAssistantReply(userId: string, chatId: string, content: string): Observable<MessageEvent> {
+  streamAssistantReply(userId: string, chatId: string, content: string, openrouterKey?: string): Observable<MessageEvent> {
     const self = this;
     return new Observable<MessageEvent>((subscriber) => {
       (async () => {
@@ -63,16 +75,32 @@ export class ChatsService {
           const history = await self.prisma.message.findMany({ where: { chatId }, orderBy: { createdAt: 'asc' } });
           const messages: Array<{ role: string; content: string }> = [];
           if (project?.systemPrompt) messages.push({ role: 'system', content: project.systemPrompt });
+
+          // Build file context block (if any)
+          const contextBlock = await self.context.buildContextForChat(project!.id, chatId, content);
+          if (contextBlock) messages.push({ role: 'system', content: contextBlock });
+
           for (const m of history) messages.push({ role: m.role, content: m.content });
 
-          const key = process.env.OPENROUTER_API_KEY;
-          const model = project?.model || 'x-ai/grok-4-fast:free';
+          const defaultModel = 'x-ai/grok-4-fast:free';
+          const model = project?.model || defaultModel;
+
+          // Determine which key to use and enforce allowlist
+          const envKey = process.env.OPENROUTER_API_KEY;
+          const usingUserKey = !!openrouterKey && PAID_MODELS.has(model);
+
+          if (PAID_MODELS.has(model) && !usingUserKey) {
+            throw new HttpException('paid_model_requires_user_key', HttpStatus.FORBIDDEN);
+          }
+
+          const key = usingUserKey ? openrouterKey! : envKey;
 
           // If no key, emit a short stub stream and persist assistant message
           if (!key) {
             const tokens = ['Thinking', '…', ' ', 'Thanks', ' ', 'for', ' ', 'your', ' ', 'message', '.'];
             for (const t of tokens) { subscriber.next({ data: t } as any); await new Promise((r) => setTimeout(r, 60)); }
             await self.prisma.message.create({ data: { chatId, userId, role: 'assistant', content: tokens.join('') } });
+            subscriber.next({ data: '[DONE]' } as any);
             subscriber.complete();
             return;
           }
@@ -82,6 +110,11 @@ export class ChatsService {
           const timeoutMs = Number(process.env.OPENROUTER_STREAM_TIMEOUT_MS || 60000);
           const timeout = setTimeout(() => ctrl.abort(), timeoutMs);
 
+          const body: any = { model, messages, stream: true };
+          if (PAID_MODELS.has(model)) {
+            body.plugins = [{ id: 'file-parser', pdf: { engine: 'native' } }]; // harmless hint for future PDF support
+          }
+
           const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
             headers: {
@@ -90,7 +123,7 @@ export class ChatsService {
               'HTTP-Referer': process.env.GATEWAY_PUBLIC_URL || 'http://localhost:3000',
               'X-Title': 'Kanari',
             },
-            body: JSON.stringify({ model, messages, stream: true }),
+            body: JSON.stringify(body),
             signal: ctrl.signal,
           });
           clearTimeout(timeout);
@@ -123,9 +156,19 @@ export class ChatsService {
               }
               try {
                 const json = JSON.parse(data);
-                const delta = json?.choices?.[0]?.delta?.content || json?.choices?.[0]?.message?.content || '';
+                const choice = json?.choices?.[0] || {};
+                let delta = '';
+                if (typeof choice?.delta === 'string') delta = choice.delta;
+                else if (choice?.delta?.content) delta = choice.delta.content;
+                else if (typeof choice?.message === 'string') delta = choice.message;
+                else if (choice?.message?.content) delta = choice.message.content;
+                else if (choice?.content) delta = choice.content;
+
+                if (typeof delta !== 'string') delta = String(delta || '');
+
                 if (delta) {
                   full += delta;
+                  // Send string fragments; FE will handle both string and JSON formats
                   subscriber.next({ data: delta } as any);
                 }
               } catch {
@@ -137,6 +180,8 @@ export class ChatsService {
           if (full) {
             await self.prisma.message.create({ data: { chatId, userId, role: 'assistant', content: full } });
           }
+          // Signal end-of-stream explicitly for FE
+          subscriber.next({ data: '[DONE]' } as any);
           subscriber.complete();
         } catch (e: any) {
           self.logger.error('stream_error', e);
@@ -146,4 +191,3 @@ export class ChatsService {
     });
   }
 }
-

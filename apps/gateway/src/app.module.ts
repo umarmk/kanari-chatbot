@@ -26,7 +26,7 @@ import { ChatsModule } from './chats/chats.module';
         OPENROUTER_API_KEY: Joi.string().optional(),
       }),
     }),
-    ThrottlerModule.forRoot([{ ttl: 60, limit: 100 }]),
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     PrismaModule,
     AuthModule,
     ProjectsModule,
