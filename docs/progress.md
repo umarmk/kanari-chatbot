@@ -1,121 +1,111 @@
-# Project Progress — Stage 1 Complete
+# Project Progress — Stage 3 In Progress
 
-This document captures the current state so the next engineer can pick up Stage 2 smoothly.
+This document captures the current state so the next engineer can continue Stage 3 (Chats + Streaming + Files context) smoothly.
 
-## Summary
+## TL;DR
 
-- Monorepo ready: NestJS services (gateway, llm-service, worker) and React web app
-- Auth implemented end-to-end:
-  - Email/password register, login, refresh (rotation), logout
-  - Google OAuth2 (Authorization Code + PKCE) with signed httpOnly cookies for state/verifier
-- Frontend auth integration:
-  - Zustand store with localStorage persistence
-  - Axios client with automatic refresh + retry
-  - Routes: Sign In, Sign Up, Auth Callback, Protected Home placeholder
-- Tests + hardening:
-  - Unit tests for auth logic and OAuth callback edge case (7 tests, all passing)
-  - Helmet, rate limiting (100 req/60s), env validation via @nestjs/config + Joi
+- Auth: complete (email/password + Google OAuth2).
+- Projects & Files (Stage 2): complete.
+- Chats & Streaming (Stage 3): implemented end-to-end; UI styling fixed; streaming UX improved; file relevance selection pending.
+- Repo: main branch up to date and pushed.
+
+## What’s done so far
+
+### Monorepo & Infra
+
+- Packages: `apps/gateway` (NestJS API), `web` (React SPA). Prisma + PostgreSQL.
+- Global hardening: Helmet, CORS (5173), Throttler (100 req/60s), ValidationPipe (whitelist + forbidNonWhitelisted).
+- Tailwind v4 wired correctly via `@import "tailwindcss"` and `@tailwindcss/postcss` plugin.
+
+### Data model (Prisma)
+
+- Project(id, userId, name, systemPrompt?, model?, params?)
+- File(id, projectId, userId, name, mime, size, storageUrl)
+- Chat(id, projectId, userId, title?)
+- Message(id, chatId, userId, role['user'|'assistant'|'system'], content, meta?)
+
+### Backend API (NestJS)
+
+- Auth endpoints (as before).
+- Projects: create/list/get/patch/delete.
+- Files: list/upload/delete (multipart, 10MB limit). Storage path under `uploads/`.
+- Chats: create/list under project; get/delete/patch; list messages; create message; SSE streaming.
+- Streaming: OpenRouter-compatible streaming; uses `project.model` or default `x-ai/grok-4-fast:free`. Timeout/abort added. Stubbed streaming path if no `OPENROUTER_API_KEY`.
+
+### Frontend (React + Zustand)
+
+- Layout: Sidebar with Projects; when a project is active, a nested Chats section appears (New/Rename/Delete).
+- ChatView: transcript, immediate user message injection, assistant placeholder with typing indicator, streaming tokens appended, Stop/Retry and error banner.
+- Tailwind v4 styling fixed; composer is sticky at bottom of right pane; lists are bulletless with consistent spacing.
+
+### Tests / Build
+
+- Gateway build and prior e2e suites passing.
+- Web builds cleanly.
 
 ## How to run
 
-1. Backend: `pnpm -F gateway start:dev`
-2. Web: `pnpm -F web dev` → http://localhost:5173
+1. Backend
+
+- `pnpm -F gateway start:dev` (PORT defaults to 3000)
+
+2. Frontend
+
+- `pnpm -F web dev` → http://localhost:5173
+
+3. Database
+
+- `pnpm exec prisma migrate dev` (already applied for current schema)
 
 ## Environment variables
 
-Required
+- `JWT_ACCESS_SECRET` (required)
+- `GATEWAY_PUBLIC_URL` (optional; used for OpenRouter headers)
+- `WEB_URL` (optional)
+- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` (optional for Google OAuth)
+- `OPENROUTER_API_KEY` (optional; if absent, a stub stream is used)
 
-- `JWT_ACCESS_SECRET` — signing key for access JWTs
+## Recent changes (handoff notes)
 
-Recommended/Optional
+- Fixed DTO validation for chat creation due to strict global ValidationPipe.
+- Implemented PATCH `/chats/:id` for rename; hooked to sidebar actions.
+- Introduced SSE timeout/abort and clearer error propagation for OpenRouter.
+- Tailwind v4 import fix and removed template `App.css` constraints; full-height layout ensured.
+- Added typing indicator + Stop/Retry + error banner in ChatView; immediate user bubble.
+- `.gitignore`: added `apps/gateway/uploads/` ignore; ensured `docs` is tracked.
 
-- `SESSION_SIGNING_KEY` — signing secret for oauth cookies (dev default used if unset)
-- `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` — for Google OAuth2
-- `GATEWAY_PUBLIC_URL` — defaults to `http://localhost:3000`
-- `WEB_URL` — defaults to `http://localhost:5173`
-- `PORT` — gateway port (default 3000)
+## Known gaps / Stage 3 remaining
 
-## Gateway (NestJS)
+- File context to LLM: Build a minimal context builder to select top‑K relevant file chunks from the project and inject into system/context (token-budgeted, with citations). For now, uploaded files are stored but not consulted during chat.
+- Friendly model labels: Map model IDs → user-friendly names (e.g., `x-ai/grok-4-fast:free` → `Grok 4 Fast`).
+- UX niceties: inline chat rename, better empty states, keyboard shortcuts.
+- Safeguards: per-user rate limits for `/chats/:id/stream`, input caps, basic prompt‑injection guards.
+- Tests: unit tests for the context builder + e2e covering streaming under ValidationPipe.
 
-- CORS enabled for http://localhost:5173, http://127.0.0.1:5173 (credentials: true)
-- Helmet applied
-- ThrottlerGuard global limit: 100 req / 60s
-- Modules: PrismaModule, AuthModule
-- PrismaService connects on module init
+## Suggested next steps (in order)
 
-Auth endpoints (see docs/api.md for details)
+1. Backend: context builder for file relevance (TF‑IDF/keyword match → top‑K chunks → truncate to token budget → inject into messages with citations).
+2. Frontend: model label mapping; display friendly model name in header/settings.
+3. Backend: endpoint‑specific throttling for `/chats/:id/stream` and clear error messages.
+4. Frontend: minor UX polish (inline rename, typing cursor, toasts).
+5. Tests: add unit tests for context builder and add an e2e streaming test that exercises the real ValidationPipe.
 
-- POST /auth/register
-- POST /auth/login
-- POST /auth/refresh
-- POST /auth/logout
-- GET /auth/google/start
-- GET /auth/google/callback
+## API quick reference
 
-Behavior notes
+See `docs/api.md` for full details. Current major surfaces:
 
-- Refresh rotates the refresh token; clients must store the new one
-- Invalid/malformed refresh tokens map to 401 (no 500s)
-- OAuth callback returns tokens in URL fragment for SPA pickup
-
-## Web (React)
-
-- Router: react-router-dom
-- Store: Zustand (`web/src/store/auth.ts`)
-- API client: Axios with 401 interceptor → POST /auth/refresh → retry once
-- Pages:
-  - `SignIn.tsx` (email/password form + "Continue with Google")
-  - `SignUp.tsx` (email/password form + "Continue with Google")
-  - `AuthCallback.tsx` (reads hash or query for tokens; stores and redirects)
-  - `Protected.tsx` (redirects unauth users)
-  - `App.tsx` routes: `/`, `/auth/sign-in`, `/auth/sign-up`, `/auth/callback`
-- Tailwind v4 with @tailwindcss/postcss; minimal global CSS, no @apply pitfalls
-
-## Tests
-
-- Command: `pnpm -F gateway test`
-- Current: 3 suites, 7 tests, all passing
-- Unit tests focus on error mapping and token handling edge cases
-
-## Recent fixes worth knowing
-
-- Tailwind v4 PostCSS plugin: switched to `@tailwindcss/postcss`
-- Removed a global `@apply m-0` to avoid v4 utility validation noise
-- OAuth callback: robust parsing (hash first, fallback to query) to avoid dev StrictMode timing loops
-- Hardening: invalid refresh token → 401, Prisma P2023 mapped to 401, strict UUID validation for sessionId prefix
-
-## Stage 2 — Suggested next steps
-
-1. Domain scaffolding (MVP)
-
-- Define minimal "Project", "Chat", and "Message" models (Prisma + migrations)
-- Authenticated CRUD: `/projects` (create/list), `/projects/:projectId/chats` (create/list)
-- Messages: `/chats/:chatId/messages` (list) and POST to append a user message and return assistant reply (stub or OpenRouter)
-- Ownership checks: scope all queries by userId from JWT
-
-2. LLM plumbing (MVP)
-
-- POST `/chats/:chatId/messages` calls OpenRouter (non‑streaming first; SSE later)
-
-3. Frontend initial chat screen
-
-- Protected route `/projects/:projectId/chats/:chatId` with message list + composer
-
-4. Tests & observability
-
-- e2e: register → login → create project → create chat → post message → 200
-- Add pino logger defaults (dev), basic request logging
-
-## Risks / gotchas
-
-- Refresh token rotation: ensure frontend always replaces stored refresh token
-- Throttling may throttle aggressive local tests; adjust per-route if needed
-- Google OAuth requires consent screen test user; ensure env vars set
+- Auth: `/auth/*`
+- Projects: `/projects` CRUD
+- Files: `/files` list/upload/delete (query `project_id`)
+- Chats: `/projects/:projectId/chats`, `/chats/:id`, `/chats/:id/messages`, `/chats/:id/stream?content=...`
 
 ## Repo state
 
-- Branch: main
-- Pushed to: https://github.com/umarmk/kanari-chatbot
-- Docs: `docs/api.md` (API), `docs/progress.md` (this file)
+- Branch: `main`
+- Remote: https://github.com/umarmk/kanari-chatbot
+- Last commit message reflects UI and streaming polish, DTO fix, SSE timeout/abort, project.model usage.
 
-If anything is unclear, check `apps/gateway/src/auth` and `web/src` — they mirror the docs closely.
+If anything is unclear, the best entry points are:
+
+- Backend: `apps/gateway/src/chats` + `apps/gateway/src/files` + `apps/gateway/src/projects`
+- Frontend: `web/src/components/Layout.tsx`, `web/src/pages/ProjectDetails.tsx`, `web/src/pages/ChatView.tsx`

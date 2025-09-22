@@ -1,4 +1,4 @@
-# Kanari API (Stage 1)
+# Kanari API
 
 Minimal, stable auth surface for local dev and early integration. All responses are JSON.
 
@@ -183,6 +183,115 @@ Notes
 
 - The SPA at `/auth/callback` should parse the URL fragment and store both tokens.
 - On success, the SPA should redirect to a protected page.
+
+---
+
+## Projects
+
+All endpoints require `Authorization: Bearer <access_token>`.
+
+### POST /projects
+
+Create a project.
+
+Request
+
+```json
+{
+  "name": "My Project",
+  "system_prompt": "You are helpful",
+  "model": "x-ai/grok-4-fast:free",
+  "params": {}
+}
+```
+
+Response 200
+
+```json
+{
+  "id": "<uuid>",
+  "name": "My Project",
+  "model": "x-ai/grok-4-fast:free",
+  "createdAt": "..."
+}
+```
+
+### GET /projects
+
+List projects for current user.
+
+### GET /projects/:id
+
+Get a project by id.
+
+### PATCH /projects/:id
+
+Update fields: `{ name?, system_prompt?, model?, params? }`.
+
+### DELETE /projects/:id
+
+Delete project (cascades chats/files by schema rules).
+
+---
+
+## Files
+
+Files belong to a project. Size limit: 10MB. Stored under `uploads/`.
+
+### GET /files?project_id=<uuid>
+
+List files for a project.
+
+### POST /files?project_id=<uuid>
+
+Multipart upload with field `file`. Response returns the created File record.
+
+### DELETE /files/:id
+
+Delete a file (ownership enforced).
+
+---
+
+## Chats
+
+### POST /projects/:projectId/chats
+
+Create a chat. Body: `{ "title"?: string }` (optional).
+
+### GET /projects/:projectId/chats
+
+List chats under a project (newest first).
+
+### GET /chats/:id
+
+Get chat.
+
+### PATCH /chats/:id
+
+Rename chat. Body: `{ "title"?: string }`.
+
+### DELETE /chats/:id
+
+Delete chat (messages cascade).
+
+### GET /chats/:id/messages
+
+List messages in ascending order.
+
+### POST /chats/:id/messages
+
+Append a user message (non-stream). Body: `{ "content": string }`.
+
+### GET /chats/:id/stream?content=...
+
+Server-Sent Events (SSE) streaming of the assistant reply for the provided prompt.
+
+- Headers: `Authorization: Bearer ...`, `Accept: text/event-stream`
+- Stream format: OpenAI-compatible lines: `data: {"choices":[{"delta":{"content":"..."}}]}` and ends with `data: [DONE]`.
+- On success, the full assistant message is persisted after stream ends.
+- If `OPENROUTER_API_KEY` is not set, a short stub is emitted; clients should tolerate keep-alives and non-JSON noise.
+
+Note: Timeout/abort is applied server-side. Client may cancel by closing connection.
 
 ---
 
