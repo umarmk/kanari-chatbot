@@ -7,6 +7,8 @@ import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import Joi from 'joi';
+import { ProjectsModule } from './projects/projects.module';
+import { FilesModule } from './files/files.module';
 
 @Module({
   imports: [
@@ -25,6 +27,8 @@ import Joi from 'joi';
     ThrottlerModule.forRoot([{ ttl: 60, limit: 100 }]),
     PrismaModule,
     AuthModule,
+    ProjectsModule,
+    FilesModule,
   ],
   controllers: [AppController],
   providers: [
