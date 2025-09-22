@@ -29,6 +29,8 @@ yarn-error.log*
 *.swo
 instructions.md
 chatbotrequirements.md
+docs/progress.md
+docs/api.md
 
 # Local uploads (runtime artifacts)
 apps/gateway/uploads/
