@@ -1,0 +1,26 @@
+{
+  "name": "kanari",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "web"
+  ],
+  "scripts": {
+    "dev": "echo \"Run dev in each app; wiring to follow after scaffold\"",
+    "build": "echo \"Build placeholder (apps will provide their own)\"",
+    "test": "echo \"Test placeholder (apps will provide their own)\"",
+    "lint": "echo \"Lint placeholder (apps will provide their own)\"",
+    "seed": "echo \"Seed placeholder (to be added)\""
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.16.2",
+    "ioredis": "^5.7.0",
+    "pg": "^8.16.3",
+    "prisma": "^6.16.2"
+  }
+}
