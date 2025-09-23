@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../store/auth';
 import { useNavigate, Link } from 'react-router-dom';
+import { Banner } from '../components/Banner';
 
 export default function SignUp() {
   const nav = useNavigate();
@@ -25,9 +26,9 @@ export default function SignUp() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] text-[var(--fg)] p-6">
-      <div className="w-full max-w-sm bg-white shadow rounded p-6 space-y-4">
+      <div className="w-full max-w-sm bg-[var(--surface)] shadow rounded p-6 space-y-4">
         <h1 className="text-xl font-semibold">Create account</h1>
-        {err && <div className="text-red-600 text-sm">{String(err)}</div>}
+        {err && <Banner type="error">{String(err)}</Banner>}
         <form onSubmit={onSubmit} className="space-y-3">
           <input className="w-full border rounded px-3 py-2" type="email" placeholder="Email" value={email} onChange={(e)=>setEmail(e.target.value)} required />
           <input className="w-full border rounded px-3 py-2" type="password" placeholder="Password (min 12 chars)" value={password} onChange={(e)=>setPassword(e.target.value)} required />

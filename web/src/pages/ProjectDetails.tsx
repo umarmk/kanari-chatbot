@@ -4,20 +4,12 @@ import { api } from '../lib/api';
 import { log } from '../lib/logger';
 import { useProjects } from '../store/projects';
 import { useChats } from '../store/chats';
+import { FREE_MODELS, PAID_MODELS } from '../lib/models';
+import { Banner } from '../components/Banner';
+import { useToast } from '../components/ToastProvider';
 
 interface Project { id: string; name: string; model?: string|null; systemPrompt?: string|null; createdAt: string; }
 interface FileRec { id: string; name: string; size: number; mime: string; createdAt: string; }
-
-const FREE_MODELS = [
-  { id: 'x-ai/grok-4-fast:free', label: 'Grok 4 Fast (Free)' },
-  { id: 'deepseek/deepseek-chat-v3.1:free', label: 'DeepSeek Chat v3.1 (Free)' },
-  { id: 'google/gemini-2.0-flash-exp:free', label: 'Gemini 2.0 Flash Exp (Free)' },
-];
-const PAID_MODELS = [
-  { id: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite (Paid)' },
-  { id: 'google/gemini-2.0-flash-lite-001', label: 'Gemini 2.0 Flash Lite 001 (Paid)' },
-  { id: 'openai/gpt-5-nano', label: 'GPT‑5 Nano (Paid)' },
-];
 
 export default function ProjectDetails() {
   const { id } = useParams<{ id: string }>();
@@ -34,7 +26,6 @@ export default function ProjectDetails() {
   const [uploading, setUploading] = useState(false);
 
   const [openrouterKey, setOpenrouterKey] = useState('');
-  const [savedKey, setSavedKey] = useState(false);
 
   const projectId = useMemo(() => id as string, [id]);
   const isPaidSelected = useMemo(() => PAID_MODELS.some((m) => m.id === model), [model]);
@@ -78,12 +69,17 @@ export default function ProjectDetails() {
     }
   }
 
+  const toast = useToast();
   function onSaveKey(e: React.FormEvent) {
     e.preventDefault();
     try {
-      if (openrouterKey) localStorage.setItem(`openrouterKey:${projectId}`, openrouterKey);
-      else localStorage.removeItem(`openrouterKey:${projectId}`);
-      setSavedKey(true); setTimeout(()=>setSavedKey(false), 1500);
+      if (openrouterKey) {
+        localStorage.setItem(`openrouterKey:${projectId}`, openrouterKey);
+        toast.success('OpenRouter key saved');
+      } else {
+        localStorage.removeItem(`openrouterKey:${projectId}`);
+        toast.info('OpenRouter key removed');
+      }
       log.info('ui.project.key_saved', { id: projectId, hasKey: !!openrouterKey });
     } catch {}
   }
@@ -163,12 +159,12 @@ export default function ProjectDetails() {
           <button className="border rounded px-3 py-1" onClick={onDelete}>Delete</button>
         </div>
 
-        {err && <div className="text-red-600 text-sm">{err}</div>}
+        {err && <div className="mb-2"><Banner type="error">{err}</Banner></div>}
         {!project && loading && <div>Loading…</div>}
 
         {project && (
           <div className="grid md:grid-cols-2 gap-6">
-            <form onSubmit={onSaveAndNewChat} className="bg-white rounded shadow p-4 space-y-3">
+            <form onSubmit={onSaveAndNewChat} className="bg-[var(--surface)] rounded shadow p-4 space-y-3">
               <h2 className="font-medium">Project settings</h2>
               <input className="w-full border rounded px-3 py-2" placeholder="Name" value={name} onChange={(e)=>setName(e.target.value)} required />
               <div>
@@ -196,7 +192,6 @@ export default function ProjectDetails() {
                     <span className="text-[11px] text-gray-600">Saved only in this browser. Used as x-openrouter-key header for paid models.</span>
                     <button className="text-xs underline" onClick={onSaveKey}>Save key</button>
                   </div>
-                  {savedKey && <div className="text-[11px] text-green-700 mt-1">Saved.</div>}
                 </div>
               )}
 
@@ -205,7 +200,7 @@ export default function ProjectDetails() {
               <button className="bg-yellow-400 hover:bg-yellow-500 text-black font-medium rounded px-3 py-2" type="submit">New Chat</button>
             </form>
 
-            <div className="bg-white rounded shadow p-4 space-y-3">
+            <div className="bg-[var(--surface)] rounded shadow p-4 space-y-3">
               <h2 className="font-medium">Files</h2>
               <p className="text-xs text-gray-600">Supported: text/*, JSON, XML, JS/TS. PDF is supported (text-only extraction). Images can be uploaded for preview but aren’t used in context yet.</p>
               <label className="inline-block">

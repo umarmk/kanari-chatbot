@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { log } from '../lib/logger';
+import { Banner } from '../components/Banner';
 
 interface Project { id: string; name: string; model?: string|null; systemPrompt?: string|null; createdAt: string; }
 
@@ -46,9 +47,9 @@ export default function Projects() {
       <div className="max-w-5xl mx-auto p-6">
         <h1 className="text-2xl font-semibold mb-4">Your Projects</h1>
 
-        <div className="bg-white rounded shadow p-4 mb-6">
+        <div className="bg-[var(--surface)] rounded shadow p-4 mb-6">
           <h2 className="font-medium mb-2">Create a project</h2>
-          {err && <div className="text-red-600 text-sm mb-2">{err}</div>}
+          {err && <div className="mb-2"><Banner type="error">{err}</Banner></div>}
           <form onSubmit={onCreate} className="space-y-3">
             <input className="w-full border rounded px-3 py-2" placeholder="Name" value={name} onChange={(e)=>setName(e.target.value)} required />
             <input className="w-full border rounded px-3 py-2" placeholder="Model (optional)" value={model} onChange={(e)=>setModel(e.target.value)} />
@@ -57,7 +58,7 @@ export default function Projects() {
           </form>
         </div>
 
-        <div className="bg-white rounded shadow">
+        <div className="bg-[var(--surface)] rounded shadow">
           <div className="px-4 py-3 border-b font-medium">Projects</div>
           {loading ? (
             <div className="p-4">Loading…</div>
