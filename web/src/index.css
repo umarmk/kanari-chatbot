@@ -2,8 +2,24 @@
 
 /* Base styles; palette: light yellow + white */
 :root {
-  --bg: #fffbea; /* light yellow */
-  --fg: #213547;
+  /* Light theme */
+  --bg: #fffdf6; /* subtle warm background */
+  --fg: #1f2937; /* slate-700 */
+
+  --surface: #ffffff;        /* cards, panes */
+  --surface-2: #f8fafc;      /* inputs, chips */
+  --muted: #6b7280;          /* gray-500 text */
+  --accent: #facc15;         /* yellow-400 */
+  --link: #1d4ed8;           /* blue-700 */
+  --code-bg: #f3f4f6;        /* gray-100 */
+  --border: #e5e7eb;         /* gray-200 */
+
+  /* UI-specific tokens */
+  --chip: #f3f4f6;           /* pill backgrounds */
+  --row-hover: #fff5cc;      /* soft yellow hover */
+  --row-active: #fff1a6;     /* stronger yellow active */
+  --bubble-user: #fde68a;    /* yellow-300 */
+  --bubble-assistant: #f3f4f6; /* gray-100 */
 }
 
 html, body, #root { height: 100%; }
@@ -14,3 +30,58 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+
+/* Dark mode tokens and markdown styling */
+.dark {
+  /* Dark theme */
+  --bg: #0b1020;            /* deep navy */
+  --fg: #e5e7eb;            /* gray-200 */
+  --surface: #0f172a;       /* slate-900 */
+  --surface-2: #111827;     /* slightly elevated */
+  --muted: #9ca3af;         /* gray-400 */
+  --accent: #eab308;        /* yellow-500 */
+  --link: #93c5fd;          /* blue-300 */
+  --code-bg: #0b1220;       /* dark panel */
+  --border: #1f2937;        /* slate-800 */
+
+  --chip: #1f2937;          /* pills */
+  --row-hover: rgba(234,179,8,0.12);
+  --row-active: rgba(234,179,8,0.18);
+  --bubble-user: rgba(234,179,8,0.18);
+  --bubble-assistant: #1f2937;
+}
+
+/* Minimal markdown defaults for assistant messages */
+.md-content { line-height: 1.65; }
+.md-content h1, .md-content h2, .md-content h3 { font-weight: 600; margin: 0.25rem 0; }
+.md-content h1 { font-size: 1.25rem; }
+.md-content h2 { font-size: 1.125rem; }
+.md-content h3 { font-size: 1rem; }
+.md-content p, .md-content ul, .md-content ol { margin: 0.25rem 0; }
+.md-content ul { list-style: disc; padding-left: 1.25rem; }
+.md-content ol { list-style: decimal; padding-left: 1.25rem; }
+.md-content strong { font-weight: 600; }
+.md-content em { font-style: italic; }
+.md-content hr { border: 0; border-top: 1px solid var(--border); margin: 0.5rem 0; }
+.md-link { color: var(--link); text-decoration: underline; }
+.md-code-inline { background: var(--code-bg); padding: 0.15rem 0.35rem; border-radius: 0.35rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.md-code-block { background: var(--code-bg); padding: 0.65rem; border-radius: 0.5rem; overflow: auto; }
+
+/* Inputs/buttons (subtle modern look) */
+input, select, textarea {
+  background: var(--surface-2);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 0.375rem;
+}
+button {
+  border-radius: 0.375rem;
+}
+
+
+/* Themed scrollbars (scoped to scrollable panes) */
+.scroll-area { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.scroll-area::-webkit-scrollbar { width: 10px; height: 10px; }
+.scroll-area::-webkit-scrollbar-thumb { background-color: var(--border); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+.scroll-area::-webkit-scrollbar-track { background: transparent; }
