@@ -25,6 +25,9 @@ Environment:
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (optional but needed for Google)
 - `GATEWAY_PUBLIC_URL` (default: http://localhost:3000)
 - `WEB_URL` (default: http://localhost:5173)
+- `OPENROUTER_API_KEY` (optional; if omitted, stub streaming is used unless client provides `x-openrouter-key`)
+- `OPENROUTER_STREAM_TIMEOUT_MS` (optional; default 60000)
+- `FILE_MAX_BYTES` (optional; default 20971520)
 
 ---
 
@@ -236,7 +239,9 @@ Delete project (cascades chats/files by schema rules).
 
 ## Files
 
-Files belong to a project. Size limit: 10MB. Stored under `uploads/`.
+Files belong to a project. Size limit: 20MB (configurable via `FILE_MAX_BYTES`). Stored under `uploads/`.
+
+Allowed types: text/\*, application/json, application/xml, application/javascript, application/pdf, images (images are accepted but not used in LLM context yet).
 
 ### GET /files?project_id=<uuid>
 
@@ -245,6 +250,11 @@ List files for a project.
 ### POST /files?project_id=<uuid>
 
 Multipart upload with field `file`. Response returns the created File record.
+
+Errors
+
+- 400 unsupported_file_type (MIME not allowed)
+- 413 Payload Too Large (> 20 MB)
 
 ### DELETE /files/:id
 
@@ -286,10 +296,11 @@ Append a user message (non-stream). Body: `{ "content": string }`.
 
 Server-Sent Events (SSE) streaming of the assistant reply for the provided prompt.
 
-- Headers: `Authorization: Bearer ...`, `Accept: text/event-stream`
-- Stream format: OpenAI-compatible lines: `data: {"choices":[{"delta":{"content":"..."}}]}` and ends with `data: [DONE]`.
+- Headers: `Authorization: Bearer ...`, `Accept: text/event-stream`, optional `x-openrouter-key: <token>` for paid models.
+- Stream format: plain text fragments in SSE lines: `data: <text>`; terminates with `data: [DONE]`.
 - On success, the full assistant message is persisted after stream ends.
-- If `OPENROUTER_API_KEY` is not set, a short stub is emitted; clients should tolerate keep-alives and non-JSON noise.
+- If neither `OPENROUTER_API_KEY` nor `x-openrouter-key` is provided, a short stub stream is emitted for local dev.
+- Throttling: endpoint-specific limit ~20 requests / 60s per user/IP.
 
 Note: Timeout/abort is applied server-side. Client may cancel by closing connection.
 
