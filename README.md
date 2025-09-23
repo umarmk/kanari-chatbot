@@ -4,7 +4,7 @@ A minimal, API‑first chatbot platform built for fast local development and cle
 
 ## Tech Stack
 
-- Backend: NestJS (Gateway API, Worker, LLM service)
+- Backend: NestJS (Gateway API)
 - Frontend: React + Vite + TailwindCSS (SPA)
 - Data: PostgreSQL (Prisma ORM), Redis (queues/cache)
 - LLM: OpenRouter integration (with model allowlist; supports free and paid keys)
@@ -16,9 +16,7 @@ A minimal, API‑first chatbot platform built for fast local development and cle
 ```
 .
 ├─ apps/
-│  ├─ gateway        # REST API: auth, projects, files, chats, SSE streaming
-│  ├─ llm-service    # LLM orchestration service (decoupled from the API edge)
-│  └─ worker         # Background jobs (queue consumers, async tasks)
+│  └─ gateway        # REST API: auth, projects, files, chats, SSE streaming
 ├─ web/              # React SPA (Vite)
 ├─ prisma/           # Prisma schema and migrations
 ├─ deploy/
@@ -36,11 +34,7 @@ A minimal, API‑first chatbot platform built for fast local development and cle
   - Handles auth: email/password + Google OAuth2 (PKCE)
   - Applies security defaults: CORS for local dev, Helmet, request throttling
   - Persists to Postgres via Prisma; uses Redis for ephemeral data/queues
-- LLM Service (NestJS)
-  - Thin service isolating model calls via OpenRouter
-  - Enforces a model allowlist and supports key injection via header for paid use
-- Worker (NestJS)
-  - Processes async tasks (e.g., long‑running jobs) off the request path
+
 - Frontend (React SPA)
   - Modern, accessible UI with Zustand for state; connects to Gateway API
 
@@ -117,12 +111,10 @@ pnpm exec prisma migrate dev
 pnpm exec prisma generate
 ```
 
-4. Start backend services (separate terminals)
+4. Start the backend
 
 ```
 pnpm -F gateway start:dev
-pnpm -F llm-service start:dev
-pnpm -F worker start:dev
 ```
 
 5. Start the web app
@@ -136,7 +128,7 @@ pnpm -F web dev
 
 ### Option B: Docker Compose (backend + infra)
 
-This runs Postgres, Redis, and the backend services (Gateway, LLM service, Worker) in containers. The Gateway image runs Prisma migrations on startup.
+This runs Postgres, Redis, and the Gateway in containers. The Gateway image runs Prisma migrations on startup.
 
 ```
 docker compose -f deploy/compose/docker-compose.yml up --build
