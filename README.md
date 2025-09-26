@@ -1,6 +1,7 @@
 # Kanari Chatbot
 
-A minimal, API‑first chatbot platform built for fast local development and clean service boundaries. The goal is to provide an ergonomic starter that is production‑lean but not over‑engineered.
+Kanari (pronounced as canary) is a full-stack, production-ready chatbot with a clean web experience and a secure, API-first backend. Users can sign in, create projects, upload files, and chat in real-time with fast LLM models provided by OpenRouter, while provider API keys stay safely on the server. It’s built for reliability and growth with streaming responses, rate limiting, usage tracking, and an event-driven architecture for scalability.
+Built with NestJS (backend), React + Vite + Tailwind (frontend), PostgreSQL/Prisma (data), and Redis (caching/queues). 
 
 ## Tech Stack
 
@@ -38,7 +39,7 @@ A minimal, API‑first chatbot platform built for fast local development and cle
 - Frontend (React SPA)
   - Modern, accessible UI with Zustand for state; connects to Gateway API
 
-Ports (dev):
+Ports (local dev):
 
 - Gateway API: http://localhost:3000
 - Web SPA: http://localhost:5173
