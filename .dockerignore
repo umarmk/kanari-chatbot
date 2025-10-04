@@ -1,0 +1,31 @@
+# Exclude heavy/irrelevant files from Docker build context (fixes Windows permission issues)
+# Repo-wide
+.git
+.git/**
+**/.git
+.env
+**/.env
+.env.*
+**/.env.*
+.DS_Store
+
+# Node / package managers
+node_modules
+**/node_modules
+**/.pnpm-store
+**/.cache
+**/.turbo
+
+# Build output
+**/dist
+**/build
+web/.vite
+web/dist
+
+# Tests and local artifacts
+**/coverage
+**/.nyc_output
+
+# Docker/local deploy files not needed in image
+deploy/compose
+
