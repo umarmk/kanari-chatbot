@@ -1,7 +1,6 @@
 // Centralized model metadata and helpers for the web app.
 
 export const FREE_MODELS = [
-  { id: 'x-ai/grok-4-fast:free', label: 'Grok 4 Fast (Free)' },
   { id: 'deepseek/deepseek-chat-v3.1:free', label: 'DeepSeek Chat v3.1 (Free)' },
   { id: 'google/gemini-2.0-flash-exp:free', label: 'Gemini 2.0 Flash Exp (Free)' },
 ];

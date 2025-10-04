@@ -13,7 +13,7 @@ export default function Projects() {
 
   const [name, setName] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
-  const [model, setModel] = useState('x-ai/grok-4-fast:free');
+  const [model, setModel] = useState('deepseek/deepseek-chat-v3.1:free');
 
   async function load() {
     setLoading(true); setErr(null);

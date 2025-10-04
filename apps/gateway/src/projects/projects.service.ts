@@ -15,7 +15,7 @@ export interface UpdateProjectInput {
   params?: Record<string, any> | null;
 }
 
-const DEFAULT_MODEL = 'x-ai/grok-4-fast:free';
+const DEFAULT_MODEL = 'deepseek/deepseek-chat-v3.1:free';
 
 @Injectable()
 export class ProjectsService {

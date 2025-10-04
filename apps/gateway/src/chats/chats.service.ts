@@ -4,7 +4,6 @@ import { Observable } from 'rxjs';
 import { ContextService } from './context.service';
 
 const FREE_MODELS = new Set<string>([
-  'x-ai/grok-4-fast:free',
   'deepseek/deepseek-chat-v3.1:free',
   'google/gemini-2.0-flash-exp:free',
 ]);
@@ -82,7 +81,7 @@ export class ChatsService {
 
           for (const m of history) messages.push({ role: m.role, content: m.content });
 
-          const defaultModel = 'x-ai/grok-4-fast:free';
+          const defaultModel = 'deepseek/deepseek-chat-v3.1:free';
           const model = project?.model || defaultModel;
 
           // Determine which key to use and enforce allowlist
