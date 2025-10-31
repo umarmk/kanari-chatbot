@@ -164,4 +164,4 @@ pnpm -F web dev
 
 ## License
 
-UNLICENSED (internal scaffolding)
+UNLICENSED 
