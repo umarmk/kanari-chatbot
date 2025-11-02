@@ -3,6 +3,8 @@
 Kanari (pronounced as canary) is a full-stack, production-ready chatbot with a clean web interface and a secure backend. Users can sign in, create projects, upload files, and chat in real-time with fast LLM models provided by OpenRouter, while provider API keys stay safely on the server. It’s built for reliability and growth with streaming responses, rate limiting, usage tracking, and an event-driven architecture for scalability.
 Built with NestJS (backend), React + Vite + Tailwind (frontend), PostgreSQL/Prisma (data), and Redis (caching/queues).
 
+<img width="1919" height="909" alt="image" src="https://github.com/user-attachments/assets/cc094a66-1af3-49e8-b6df-61e25b407ff1" />
+
 ## Tech Stack
 
 - Backend: NestJS (Gateway API)
