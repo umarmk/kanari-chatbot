@@ -23,7 +23,7 @@ export const FREE_MODELS = MODELS.filter((m) => m.access === 'free');
 export const PAID_MODELS = MODELS.filter((m) => m.access === 'paid');
 
 // The default model used when a project doesn't specify one.
-export const DEFAULT_MODEL_ID = 'deepseek/deepseek-chat-v3.1:free';
+export const DEFAULT_MODEL_ID = 'openai/gpt-oss-120b:free';
 
 const ALLOWED_MODEL_IDS = new Set(MODELS.map((m) => m.id));
 const PAID_MODEL_IDS = new Set(PAID_MODELS.map((m) => m.id));
