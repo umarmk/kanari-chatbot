@@ -1,11 +1,7 @@
 # Kanari Chatbot
 
-<<<<<<< HEAD
-Kanari is a full-stack chatbot: a NestJS Gateway API + a React/Vite web app. Users sign in, create Projects, upload Files, and chat in real time with SSE streaming assistant replies via OpenRouter.
-=======
 Kanari (pronounced as canary) is a full-stack, production-ready  AI chatbot web app with a clean web interface and a secure backend. Users can sign in, create projects, upload files, and chat in real-time with fast LLM models provided by OpenRouter, while provider API keys stay safely on the server. It’s built for reliability and growth with streaming responses, rate limiting, usage tracking, and an event-driven architecture for scalability.
 Built with NestJS (backend), React + Vite + Tailwind (frontend), PostgreSQL/Prisma (data), and Redis (caching/queues).
->>>>>>> 836f41dbc43bee3d244981f1aed27e0e06ee28b4
 
 <img width="1919" height="909" alt="image" src="https://github.com/user-attachments/assets/cc094a66-1af3-49e8-b6df-61e25b407ff1" />
 
@@ -134,7 +130,6 @@ pnpm -F web dev
 
 ## Security Notes
 
-<<<<<<< HEAD
 - Paid models require OpenRouter key (`x-openrouter-key`); server key is only used for free models.
 - OAuth redirect hardening: `/auth/google/start?redirect=...` only accepts relative paths like `/auth/callback`.
 - Tokens are currently stored in browser `localStorage` (see `web/src/store/auth.ts`).
@@ -142,8 +137,3 @@ pnpm -F web dev
 - JWT access tokens; refresh tokens are opaque and rotated on use
 - CORS restricted to local dev origins by default
 - Apply least‑privilege secrets in production; rotate regularly
-
-## License
-
-UNLICENSED 
->>>>>>> 836f41dbc43bee3d244981f1aed27e0e06ee28b4
