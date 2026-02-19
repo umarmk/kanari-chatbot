@@ -1,10 +1,10 @@
 // Centralized model metadata and helpers for the web app.
 
 export const FREE_MODELS = [
-  { id: 'deepseek/deepseek-chat-v3.1:free', label: 'DeepSeek Chat v3.1 (Free)' },
-  { id: 'google/gemini-2.0-flash-exp:free', label: 'Gemini 2.0 Flash Exp (Free)' },
-  { id: 'minimax/minimax-m2:free', label: 'Minimax M2 (Free)' },
-  { id: 'z-ai/glm-4.5-air:free', label: 'GLM 4.5 Air (Free)' },
+  { id: 'openai/gpt-oss-120b:free', label: 'OpenAI gpt-oss 120B (Free)' },
+  { id: 'deepseek/deepseek-r1-0528:free', label: 'DeepSeek R1-0528 (Free)' },
+  { id: 'arcee-ai/trinity-large-preview:free', label: 'Arcee Trinity Large (Free)' },
+  { id: 'z-ai/glm-4.5-air:free', label: 'Z-AI GLM 4.5 Air (Free)' },
 ];
 
 export const PAID_MODELS = [

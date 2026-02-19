@@ -9,10 +9,10 @@ export type ModelInfo = {
 // Single source of truth for supported models.
 // Backend enforces this allowlist for Project.model and for paid/free key behavior.
 export const MODELS: readonly ModelInfo[] = [
-  { id: 'deepseek/deepseek-chat-v3.1:free', label: 'DeepSeek Chat v3.1 (Free)', access: 'free' },
-  { id: 'google/gemini-2.0-flash-exp:free', label: 'Gemini 2.0 Flash Exp (Free)', access: 'free' },
-  { id: 'minimax/minimax-m2:free', label: 'Minimax M2 (Free)', access: 'free' },
-  { id: 'z-ai/glm-4.5-air:free', label: 'GLM 4.5 Air (Free)', access: 'free' },
+  { id: 'openai/gpt-oss-120b:free', label: 'OpenAI gpt-oss 120B (Free)', access: 'free' },
+  { id: 'deepseek/deepseek-r1-0528:free', label: 'DeepSeek R1-0528 (Free)', access: 'free' },
+  { id: 'arcee-ai/trinity-large-preview:free', label: 'Arcee Trinity Large (Free)', access: 'free' },
+  { id: 'z-ai/glm-4.5-air:free', label: 'Z-AI GLM 4.5 Air (Free)', access: 'free' },
 
   { id: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite (Paid)', access: 'paid' },
   { id: 'google/gemini-2.0-flash-lite-001', label: 'Gemini 2.0 Flash Lite 001 (Paid)', access: 'paid' },
