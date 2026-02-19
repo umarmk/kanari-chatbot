@@ -45,7 +45,7 @@ describe('ContextService', () => {
 
     const res = await svc.buildContextForChat('p1', 'c1', 'question about alpha');
     expect(res).toBeTruthy();
-    expect(res!).toContain('[file:notes.txt#');
+    expect(res!).toContain('File: notes.txt');
     expect(res!).toMatch(/Alpha appears here/i);
   });
 
@@ -58,8 +58,7 @@ describe('ContextService', () => {
 
     const res = await svc.buildContextForChat('p1', 'c1', 'ask about beta');
     expect(res).toBeTruthy();
-    expect(res!).toContain('[file:doc.pdf#');
+    expect(res!).toContain('File: doc.pdf');
     expect(res!).toMatch(/beta token/i);
   });
 });
-

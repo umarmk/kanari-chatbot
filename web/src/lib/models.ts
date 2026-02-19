@@ -3,6 +3,8 @@
 export const FREE_MODELS = [
   { id: 'deepseek/deepseek-chat-v3.1:free', label: 'DeepSeek Chat v3.1 (Free)' },
   { id: 'google/gemini-2.0-flash-exp:free', label: 'Gemini 2.0 Flash Exp (Free)' },
+  { id: 'minimax/minimax-m2:free', label: 'Minimax M2 (Free)' },
+  { id: 'z-ai/glm-4.5-air:free', label: 'GLM 4.5 Air (Free)' },
 ];
 
 export const PAID_MODELS = [

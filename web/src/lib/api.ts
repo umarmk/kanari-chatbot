@@ -5,6 +5,8 @@ import { log } from './logger';
 export const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 export const api = axios.create({ baseURL: API_BASE, withCredentials: true });
+// Separate client for refresh to avoid interceptor recursion / deadlocks when refresh itself 401s.
+const refreshApi = axios.create({ baseURL: API_BASE, withCredentials: true });
 
 // Request logging + auth header
 api.interceptors.request.use((config) => {
@@ -20,8 +22,8 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-let isRefreshing = false;
-let pending: Array<() => void> = [];
+// Single-flight refresh: coalesces concurrent 401s into one refresh request.
+let refreshInFlight: Promise<void> | null = null;
 
 api.interceptors.response.use(
   (r) => {
@@ -36,29 +38,37 @@ api.interceptors.response.use(
     if (!response || response.status !== 401 || config.__retried) throw error;
 
     const store = useAuth.getState();
+    const url = String(config?.url || '');
+    if (url.includes('/auth/refresh')) {
+      // If refresh fails, force logout rather than hanging awaiting a refresh that will never succeed.
+      store.clear();
+      throw error;
+    }
     if (!store.refreshToken) {
       store.clear();
       throw error;
     }
 
-    if (isRefreshing) {
-      await new Promise<void>((resolve) => pending.push(resolve));
-    } else {
-      isRefreshing = true;
-      try {
-        const res = await api.post('/auth/refresh', { refresh_token: store.refreshToken });
+    if (!refreshInFlight) {
+      refreshInFlight = (async () => {
+        const res = await refreshApi.post('/auth/refresh', { refresh_token: store.refreshToken });
         store.setTokens(res.data.access_token, res.data.refresh_token);
         log.info('auth.refreshed');
-      } catch (e) {
-        store.clear();
-        pending = [];
-        isRefreshing = false;
-        log.error('auth.refresh_failed');
-        throw error;
-      }
-      isRefreshing = false;
-      pending.forEach((fn) => fn());
-      pending = [];
+      })()
+        .catch((e) => {
+          store.clear();
+          log.error('auth.refresh_failed');
+          throw e;
+        })
+        .finally(() => {
+          refreshInFlight = null;
+        });
+    }
+
+    try {
+      await refreshInFlight;
+    } catch {
+      throw error;
     }
 
     // retry once with new token
@@ -69,4 +79,3 @@ api.interceptors.response.use(
     return api.request(retry);
   },
 );
-

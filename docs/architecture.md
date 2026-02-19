@@ -26,8 +26,8 @@ flowchart LR
 - Stack: React 19, Vite 7, React Router, Zustand, Tailwind.
 - API: axios instance with baseURL from `import.meta.env.VITE_API_URL`; `withCredentials: true`.
 - Auth:
-  - Access token (JWT, 15m) stored in memory (Zustand).
-  - Axios interceptor auto-attaches `Authorization: Bearer <token>` and performs 401 refresh with `/auth/refresh` using a refresh token.
+  - Access + refresh tokens persisted in `localStorage` via Zustand store (`kanari.auth.tokens`).
+  - Axios interceptor auto-attaches `Authorization: Bearer <token>` and performs a single 401 refresh with `/auth/refresh` using the refresh token.
 - Routing: SPA fallback via Netlify `_redirects` or `netlify.toml`.
 - Build output: `web/dist`.
 - Required env: `VITE_API_URL` (e.g., `https://<gateway-host>`).
@@ -40,16 +40,17 @@ flowchart LR
 - Middleware/security: Helmet, cookie‑parser (signed cookies for OAuth), global ValidationPipe, CORS (origins from `WEB_URL`), throttling (`@nestjs/throttler`).
 - Auth design:
   - Access: JWT signed with `JWT_ACCESS_SECRET`, 15 minutes.
-  - Refresh: opaque token `sessionId.random` (not JWT). Server stores Argon2 hash in `Session` table; rotation on refresh; 7‑day expiry.
+  - Refresh: opaque token `sessionId.random` (not JWT). Server stores Argon2 hash in Redis (`session:<sessionId>`); rotation on refresh; 7‑day expiry.
   - Endpoints: `/auth/register`, `/auth/login`, `/auth/refresh`, `/auth/logout`.
-  - Google OAuth: `/auth/google/start` and `/auth/google/callback` using PKCE; after callback, SPA is redirected to `/auth/callback#<tokens>`.
+  - Google OAuth: `/auth/google/start` and `/auth/google/callback` using PKCE; after callback, SPA is redirected with tokens in the URL fragment (default `/auth/callback`). Redirects are restricted to same-origin relative paths.
 - Files: metadata in DB; binary files saved to `./uploads` directory (ephemeral in many hosts; move to object storage for production longevity).
+- Models: backend enforces a model allowlist; frontend reads it from `GET /models` to avoid drift.
 - Health: `GET /` returns a simple string.
 
 ### Required backend env vars
 - `DATABASE_URL` (Postgres connection; with Neon use pooled URL with `?sslmode=require&pgbouncer=true&connection_limit=1`).
 - `JWT_ACCESS_SECRET`, `SESSION_SIGNING_KEY`.
-- `WEB_URL` (comma‑separated allowed origins for CORS; set to your Netlify URL).
+- `WEB_URL` (comma‑separated allowed origins for CORS; first entry is used as the OAuth redirect base in production).
 - `GATEWAY_PUBLIC_URL` (public base URL used for OAuth callbacks).
 - Optional: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `OPENROUTER_API_KEY`, `PORT`.
 
@@ -90,4 +91,3 @@ flowchart LR
 
 ## Future/optional services
 - `apps/llm-service`, `apps/worker` are scaffolds not required for current scope. If enabled later, they should integrate via job queue and share DB access via Prisma.
-

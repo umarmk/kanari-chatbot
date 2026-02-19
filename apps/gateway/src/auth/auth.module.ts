@@ -4,12 +4,14 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
 import { PrismaModule } from '../prisma/prisma.module';
+import { RedisModule } from '../redis/redis.module';
 import { OauthController } from './oauth.controller';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 @Module({
   imports: [
     PrismaModule,
+    RedisModule,
     UsersModule,
     ConfigModule,
     JwtModule.registerAsync({

@@ -2,24 +2,20 @@ import { Injectable, UnauthorizedException, BadRequestException } from '@nestjs/
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
 import { UsersService } from '../users/users.service';
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 
 const ACCESS_EXPIRES = '15m';
 const REFRESH_DAYS = 7; // session expiry
-const UUID_RE = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
-
-function addDays(date: Date, days: number): Date {
-  const d = new Date(date);
-  d.setDate(d.getDate() + days);
-  return d;
-}
+const REFRESH_SECONDS = REFRESH_DAYS * 24 * 60 * 60; // 7 days in seconds
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly jwt: JwtService,
     private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
     private readonly users: UsersService,
   ) {}
 
@@ -29,36 +25,37 @@ export class AuthService {
   }
 
   private async createSession(userId: string) {
-    // Create session first to get UUID id
-    const session = await this.prisma.session.create({
-      data: {
-        userId,
-        expiresAt: addDays(new Date(), REFRESH_DAYS),
-      },
-    });
-
+    // Generate a unique session ID
+    const sessionId = randomUUID();
     const tokenSuffix = randomBytes(32).toString('base64url');
-    const refreshToken = `${session.id}.${tokenSuffix}`;
+    const refreshToken = `${sessionId}.${tokenSuffix}`;
     const refreshTokenHash = await argon2.hash(refreshToken, { type: argon2.argon2id });
 
-    await this.prisma.session.update({
-      where: { id: session.id },
-      data: { refreshTokenHash },
+    // Store session in Redis with TTL
+    const sessionData = JSON.stringify({
+      userId,
+      refreshTokenHash,
+      createdAt: new Date().toISOString(),
     });
 
-    return { sessionId: session.id, refreshToken };
+    await this.redis.set(`session:${sessionId}`, sessionData, REFRESH_SECONDS);
+
+    return { sessionId, refreshToken };
   }
 
   private async rotateSession(sessionId: string, userId: string) {
     const tokenSuffix = randomBytes(32).toString('base64url');
     const refreshToken = `${sessionId}.${tokenSuffix}`;
     const refreshTokenHash = await argon2.hash(refreshToken, { type: argon2.argon2id });
-    const expiresAt = addDays(new Date(), REFRESH_DAYS);
 
-    await this.prisma.session.update({
-      where: { id: sessionId },
-      data: { refreshTokenHash, expiresAt },
+    // Update session in Redis with new hash and reset TTL
+    const sessionData = JSON.stringify({
+      userId,
+      refreshTokenHash,
+      createdAt: new Date().toISOString(),
     });
+
+    await this.redis.set(`session:${sessionId}`, sessionData, REFRESH_SECONDS);
 
     return { refreshToken };
   }
@@ -94,25 +91,25 @@ export class AuthService {
 
   async refresh(refreshToken: string) {
     const sessionId = refreshToken.split('.')[0];
-    if (!sessionId || !UUID_RE.test(sessionId)) throw new UnauthorizedException('invalid_refresh_token');
+    if (!sessionId) throw new UnauthorizedException('invalid_refresh_token');
 
-    let session;
-    try {
-      session = await this.prisma.session.findUnique({ where: { id: sessionId } });
-    } catch (e: any) {
-      if (e?.code === 'P2023') throw new UnauthorizedException('invalid_refresh_token');
-      throw e;
-    }
-    if (!session) throw new UnauthorizedException('invalid_refresh_token');
-    if (session.expiresAt < new Date()) throw new UnauthorizedException('session_expired');
+    // Get session from Redis
+    const sessionDataStr = await this.redis.get(`session:${sessionId}`);
+    if (!sessionDataStr) throw new UnauthorizedException('invalid_refresh_token');
 
-    const ok = session.refreshTokenHash
-      ? await argon2.verify(session.refreshTokenHash, refreshToken)
-      : false;
+    const sessionData = JSON.parse(sessionDataStr) as {
+      userId: string;
+      refreshTokenHash: string;
+      createdAt: string;
+    };
+
+    // Verify refresh token hash
+    const ok = await argon2.verify(sessionData.refreshTokenHash, refreshToken);
     if (!ok) throw new UnauthorizedException('invalid_refresh_token');
 
-    const access_token = await this.signAccessToken(session.userId);
-    const { refreshToken: newRefresh } = await this.rotateSession(session.id, session.userId);
+    // Issue new tokens
+    const access_token = await this.signAccessToken(sessionData.userId);
+    const { refreshToken: newRefresh } = await this.rotateSession(sessionId, sessionData.userId);
 
     return { access_token, refresh_token: newRefresh };
   }
@@ -120,7 +117,7 @@ export class AuthService {
   async logout(refreshToken: string) {
     const sessionId = refreshToken.split('.')[0];
     if (!sessionId) return;
-    await this.prisma.session.delete({ where: { id: sessionId } }).catch(() => undefined);
+    await this.redis.del(`session:${sessionId}`).catch(() => undefined);
   }
 }
 

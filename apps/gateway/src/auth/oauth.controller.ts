@@ -4,8 +4,29 @@ import { randomBytes, createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from './auth.service';
 
+// Google OAuth (PKCE) controller.
+// - Uses signed, short-lived cookies to store state + code_verifier between /start and /callback.
+// - Restricts optional `redirect` to safe, root-relative paths to prevent token exfiltration via open redirects.
 function base64url(input: Buffer) {
   return input.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function oauthCookieOpts() {
+  return { httpOnly: true, signed: true as const, sameSite: 'lax' as const, maxAge: 10 * 60 * 1000 };
+}
+
+// Only allow root-relative paths like `/some/page`.
+// Reject absolute URLs, scheme-relative URLs (`//evil.example`), fragments, and control characters.
+function normalizeRedirectPath(input?: string): string | null {
+  if (!input) return null;
+  const v = String(input);
+  if (v.length > 2048) return null;
+  // Must be a root-relative path; disallow scheme-relative URLs like //evil.example
+  if (!v.startsWith('/') || v.startsWith('//')) return null;
+  // Reject control chars and backslashes
+  if (/[\u0000-\u001F\u007F\\]/.test(v)) return null;
+  // Drop any fragment; we'll attach our own for tokens.
+  return v.split('#')[0];
 }
 
 function pkceChallenge(verifier: string) {
@@ -29,10 +50,11 @@ export class OauthController {
     const challenge = pkceChallenge(verifier);
 
     // Short-lived, signed, httpOnly cookies to keep state and verifier
-    const cookieOpts = { httpOnly: true, signed: true as const, sameSite: 'lax' as const, maxAge: 10 * 60 * 1000 };
+    const cookieOpts = oauthCookieOpts();
     res.cookie('g_state', state, cookieOpts);
     res.cookie('g_verifier', verifier, cookieOpts);
-    if (redirect) res.cookie('g_redirect', redirect, cookieOpts);
+    const redirectPath = normalizeRedirectPath(redirect);
+    if (redirectPath) res.cookie('g_redirect', redirectPath, cookieOpts);
 
     const params = new URLSearchParams({
       client_id: clientId,
@@ -59,7 +81,7 @@ export class OauthController {
     const req = res.req as Request;
     const savedState = (req as any).signedCookies?.['g_state'];
     const verifier = (req as any).signedCookies?.['g_verifier'];
-    const redirectAfter = (req as any).signedCookies?.['g_redirect'];
+    const redirectAfter = normalizeRedirectPath((req as any).signedCookies?.['g_redirect']);
 
     if (!savedState || !verifier || state !== savedState) throw new BadRequestException('invalid_state');
 
@@ -112,13 +134,20 @@ export class OauthController {
     const tokens = await this.auth.issueTokensForUser(user.id);
 
     // Clear cookies and redirect with tokens in URL fragment for SPA to pick up
-    res.clearCookie('g_state');
-    res.clearCookie('g_verifier');
-    res.clearCookie('g_redirect');
+    const cookieOpts = oauthCookieOpts();
+    res.clearCookie('g_state', cookieOpts);
+    res.clearCookie('g_verifier', cookieOpts);
+    res.clearCookie('g_redirect', cookieOpts);
 
-    const frontend = redirectAfter || process.env.WEB_URL || 'http://localhost:5173';
+    const webUrlEnv = process.env.WEB_URL;
+    const frontendBase = (webUrlEnv ? webUrlEnv.split(',')[0].trim() : '') || 'http://localhost:5173';
+    if (process.env.NODE_ENV === 'production' && !webUrlEnv) {
+      throw new BadRequestException('web_url_not_configured');
+    }
+
+    const base = frontendBase.endsWith('/') ? frontendBase.slice(0, -1) : frontendBase;
+    const path = redirectAfter || '/auth/callback';
     const fragment = new URLSearchParams(tokens as any).toString();
-    return res.redirect(`${frontend}/auth/callback#${fragment}`);
+    return res.redirect(`${base}${path}#${fragment}`);
   }
 }
-

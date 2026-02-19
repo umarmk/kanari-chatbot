@@ -10,6 +10,7 @@ import { useToast } from '../components/ToastProvider';
 
 interface Project { id: string; name: string; model?: string|null; systemPrompt?: string|null; createdAt: string; }
 interface FileRec { id: string; name: string; size: number; mime: string; createdAt: string; }
+type ModelInfo = { id: string; label: string; access: 'free' | 'paid' };
 
 export default function ProjectDetails() {
   const { id } = useParams<{ id: string }>();
@@ -28,19 +29,36 @@ export default function ProjectDetails() {
   const [openrouterKey, setOpenrouterKey] = useState('');
 
   const projectId = useMemo(() => id as string, [id]);
-  const isPaidSelected = useMemo(() => PAID_MODELS.some((m) => m.id === model), [model]);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  // Fallback list for offline/dev scenarios; backend remains the source of truth via `GET /models`.
+  const fallbackModels = useMemo<ModelInfo[]>(
+    () => [
+      ...FREE_MODELS.map((m) => ({ ...m, access: 'free' as const })),
+      ...PAID_MODELS.map((m) => ({ ...m, access: 'paid' as const })),
+    ],
+    [],
+  );
+  const allModels = useMemo(() => (models.length ? models : fallbackModels), [models, fallbackModels]);
+  const freeModels = useMemo(() => allModels.filter((m) => m.access === 'free'), [allModels]);
+  const paidModels = useMemo(() => allModels.filter((m) => m.access === 'paid'), [allModels]);
+  const isPaidSelected = useMemo(() => allModels.some((m) => m.id === model && m.access === 'paid'), [allModels, model]);
 
   async function load() {
     if (!projectId) return;
     setLoading(true); setErr(null);
     try {
-      const [p, f] = await Promise.all([
+      const [p, f, m] = await Promise.all([
         api.get(`/projects/${projectId}`),
         api.get(`/files`, { params: { project_id: projectId } }),
+        // Fetch backend allowlist to keep FE in sync with BE model validation.
+        api.get(`/models`).catch(() => null),
       ]);
+      const backendModels = (m as any)?.data?.models as ModelInfo[] | undefined;
+      const defaultModel = (m as any)?.data?.default_model as string | undefined;
+      if (Array.isArray(backendModels) && backendModels.length) setModels(backendModels);
       setProject(p.data);
       setName(p.data.name || '');
-      setModel(p.data.model || '');
+      setModel(p.data.model || defaultModel || '');
       setSystemPrompt(p.data.systemPrompt || '');
       setFiles(f.data);
       try { setOpenrouterKey(localStorage.getItem(`openrouterKey:${projectId}`) || ''); } catch {}
@@ -97,7 +115,7 @@ export default function ProjectDetails() {
     setErr(null);
     try {
       const res = await api.patch(`/projects/${projectId}`, {
-        name, model: model || null, system_prompt: systemPrompt || null,
+        name, model: model || null, system_prompt: systemPrompt || null, //snake_case
       });
       setProject(res.data);
       useProjects.getState().update(res.data);
@@ -171,10 +189,10 @@ export default function ProjectDetails() {
                 <label className="block text-sm mb-1">Model</label>
                 <select className="w-full border rounded px-3 py-2" value={model} onChange={(e)=>setModel(e.target.value)}>
                   <optgroup label="Free">
-                    {FREE_MODELS.map((m)=> (<option key={m.id} value={m.id}>{m.label}</option>))}
+                    {freeModels.map((m)=> (<option key={m.id} value={m.id}>{m.label}</option>))}
                   </optgroup>
                   <optgroup label="Paid (BYO Key)">
-                    {PAID_MODELS.map((m)=> (<option key={m.id} value={m.id}>{m.label}</option>))}
+                    {paidModels.map((m)=> (<option key={m.id} value={m.id}>{m.label}</option>))}
                   </optgroup>
                 </select>
                 <p className="text-[11px] text-gray-500 mt-1">Paid models require your own OpenRouter API key (handled securely, never sent to providers other than OpenRouter).</p>
@@ -226,4 +244,3 @@ export default function ProjectDetails() {
     </div>
   );
 }
-

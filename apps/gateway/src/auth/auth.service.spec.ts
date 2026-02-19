@@ -1,77 +1,62 @@
-import { UnauthorizedException, BadRequestException } from '@nestjs/common';
+import { UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
+const argon2 = require('argon2');
 
 // Simple stubs for dependencies
 const jwt = { signAsync: jest.fn().mockResolvedValue('access.jwt') } as any;
-
-function makePrisma(overrides: Partial<any> = {}) {
-  return {
-    user: { findUnique: jest.fn(), create: jest.fn() },
-    session: {
-      create: jest.fn(),
-      update: jest.fn(),
-      findUnique: jest.fn(),
-      delete: jest.fn(),
-    },
-    ...overrides,
-  } as any;
-}
-
-function makeUsers(prisma: any) {
-  return {
-    findByEmail: (email: string) => prisma.user.findUnique({ where: { email } }),
-    create: (email: string, passwordHash: string) => prisma.user.create({ data: { email, passwordHash } }),
-  } as any;
-}
+const prisma: any = {}; // injected but currently unused
+const redis = { set: jest.fn(), get: jest.fn(), del: jest.fn() } as any;
+const users = { findByEmail: jest.fn(), create: jest.fn() } as any;
 
 describe('AuthService (unit)', () => {
-  beforeEach(() => jest.resetAllMocks());
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jwt.signAsync.mockResolvedValue('access.jwt');
+  });
 
   it('login: throws invalid_credentials when user not found', async () => {
-    const prisma = makePrisma();
-    prisma.user.findUnique.mockResolvedValue(null);
-    const users = makeUsers(prisma);
-    const svc = new AuthService(jwt, prisma, users);
-
+    users.findByEmail.mockResolvedValue(null);
+    const svc = new AuthService(jwt, prisma, redis, users);
     await expect(svc.login('missing@example.com', 'pass')).rejects.toThrow(UnauthorizedException);
   });
 
   it('login: throws invalid_credentials when password mismatch', async () => {
-    jest.spyOn(require('argon2'), 'verify').mockResolvedValue(false as any);
-    const prisma = makePrisma();
-    prisma.user.findUnique.mockResolvedValue({ id: 'u1', email: 'a@b.c', passwordHash: 'hashed' });
-    const users = makeUsers(prisma);
-    const svc = new AuthService(jwt, prisma, users);
-
+    jest.spyOn(argon2, 'verify').mockResolvedValue(false as any);
+    users.findByEmail.mockResolvedValue({ id: 'u1', email: 'a@b.c', passwordHash: 'hashed' });
+    const svc = new AuthService(jwt, prisma, redis, users);
     await expect(svc.login('a@b.c', 'wrong')).rejects.toThrow(UnauthorizedException);
   });
 
-  it('refresh: rejects non-uuid token prefix', async () => {
-    const prisma = makePrisma();
-    const users = makeUsers(prisma);
-    const svc = new AuthService(jwt, prisma, users);
-
-    await expect(svc.refresh('not-a-uuid.suffix')).rejects.toThrow(UnauthorizedException);
+  it('refresh: rejects when session is missing in redis', async () => {
+    redis.get.mockResolvedValue(null);
+    const svc = new AuthService(jwt, prisma, redis, users);
+    await expect(svc.refresh('session1.suffix')).rejects.toThrow(UnauthorizedException);
   });
 
-  it('refresh: maps Prisma P2023 to invalid_refresh_token', async () => {
-    const prisma = makePrisma();
-    prisma.session.findUnique.mockRejectedValue({ code: 'P2023' });
-    const users = makeUsers(prisma);
-    const svc = new AuthService(jwt, prisma, users);
-
-    // well-formed UUID prefix but prisma throws P2023
-    const token = '123e4567-e89b-12d3-a456-426614174000.suf';
-    await expect(svc.refresh(token)).rejects.toThrow(UnauthorizedException);
+  it('refresh: rejects when refresh token hash mismatch', async () => {
+    jest.spyOn(argon2, 'verify').mockResolvedValue(false as any);
+    redis.get.mockResolvedValue(JSON.stringify({ userId: 'u1', refreshTokenHash: 'hash', createdAt: new Date().toISOString() }));
+    const svc = new AuthService(jwt, prisma, redis, users);
+    await expect(svc.refresh('session1.suffix')).rejects.toThrow(UnauthorizedException);
   });
 
-  it('logout: deletes session by id from token prefix', async () => {
-    const prisma = makePrisma();
-    prisma.session.delete.mockResolvedValue(undefined);
-    const users = makeUsers(prisma);
-    const svc = new AuthService(jwt, prisma, users);
-    await svc.logout('123e4567-e89b-12d3-a456-426614174000.abcd');
-    expect(prisma.session.delete).toHaveBeenCalledWith({ where: { id: '123e4567-e89b-12d3-a456-426614174000' } });
+  it('refresh: rotates session and returns new refresh token', async () => {
+    jest.spyOn(argon2, 'verify').mockResolvedValue(true as any);
+    jest.spyOn(argon2, 'hash').mockResolvedValue('newhash' as any);
+    redis.get.mockResolvedValue(JSON.stringify({ userId: 'u1', refreshTokenHash: 'hash', createdAt: new Date().toISOString() }));
+    redis.set.mockResolvedValue(undefined);
+
+    const svc = new AuthService(jwt, prisma, redis, users);
+    const res = await svc.refresh('session1.suffix');
+    expect(res.access_token).toBe('access.jwt');
+    expect(res.refresh_token).toMatch(/^session1\./);
+    expect(redis.set).toHaveBeenCalledWith(expect.stringMatching(/^session:session1$/), expect.any(String), expect.any(Number));
+  });
+
+  it('logout: deletes session in redis', async () => {
+    redis.del.mockResolvedValue(undefined);
+    const svc = new AuthService(jwt, prisma, redis, users);
+    await svc.logout('session1.suffix');
+    expect(redis.del).toHaveBeenCalledWith('session:session1');
   });
 });
-

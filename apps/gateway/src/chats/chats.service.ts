@@ -1,17 +1,9 @@
+/* eslint-disable prettier/prettier */
 import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Observable } from 'rxjs';
 import { ContextService } from './context.service';
-
-const FREE_MODELS = new Set<string>([
-  'deepseek/deepseek-chat-v3.1:free',
-  'google/gemini-2.0-flash-exp:free',
-]);
-const PAID_MODELS = new Set<string>([
-  'google/gemini-2.5-flash-lite',
-  'google/gemini-2.0-flash-lite-001',
-  'openai/gpt-5-nano',
-]);
+import { DEFAULT_MODEL_ID, isAllowedModel, isPaidModel } from './models';
 
 @Injectable()
 export class ChatsService {
@@ -63,56 +55,104 @@ export class ChatsService {
   streamAssistantReply(userId: string, chatId: string, content: string, openrouterKey?: string): Observable<MessageEvent> {
     const self = this;
     return new Observable<MessageEvent>((subscriber) => {
+      const timeoutMs = Number(process.env.OPENROUTER_STREAM_TIMEOUT_MS || 60000);
+      let ctrl: AbortController | null = null;
+      let timeout: ReturnType<typeof setTimeout> | null = null;
+      let abortedByTeardown = false;
+
+      const teardown = () => {
+        abortedByTeardown = true;
+        if (timeout) clearTimeout(timeout);
+        if (ctrl && !ctrl.signal.aborted) ctrl.abort();
+      };
+
       (async () => {
         try {
           // Save user message first
-          await self.createUserMessage(userId, chatId, content);
+          const createdUserMessage = await self.createUserMessage(userId, chatId, content);
 
           // Gather context
           const chat = await self.ensureChatOwnership(userId, chatId);
           const project = await self.prisma.project.findFirst({ where: { id: chat.projectId, userId } });
+          if (!project) throw new HttpException('project_not_found', HttpStatus.NOT_FOUND);
           const history = await self.prisma.message.findMany({ where: { chatId }, orderBy: { createdAt: 'asc' } });
           const messages: Array<{ role: string; content: string }> = [];
-          if (project?.systemPrompt) messages.push({ role: 'system', content: project.systemPrompt });
-
+          
+          // Check if project has a system prompt
+          if (project?.systemPrompt) {
+            messages.push({ role: 'system', content: project.systemPrompt });
+          }
+          // If no system prompt, use a default one
+          else {
+            messages.push({ role: 'system', content: 'You are a helpful assistant.' });
+          }
+          
           // Build file context block (if any)
-          const contextBlock = await self.context.buildContextForChat(project!.id, chatId, content);
-          if (contextBlock) messages.push({ role: 'system', content: contextBlock });
+          const contextBlock = await self.context.buildContextForChat(project.id, chatId, content);
 
-          for (const m of history) messages.push({ role: m.role, content: m.content });
+          // Instead of adding context as a system message, prepend it to the user's message
+          let userMessage = content;
+          if (contextBlock) {
+            userMessage = `${contextBlock}\n\n---\n\nUser's question: ${content}`;
+          }
 
-          const defaultModel = 'deepseek/deepseek-chat-v3.1:free';
-          const model = project?.model || defaultModel;
+          // Add history messages, but replace the freshly created user message to avoid duplication upstream.
+          let replaced = false;
+          for (const m of history) {
+            if (m.id === createdUserMessage.id) {
+              messages.push({ role: 'user', content: userMessage });
+              replaced = true;
+            } else {
+              messages.push({ role: m.role, content: m.content });
+            }
+          }
+          if (!replaced) messages.push({ role: 'user', content: userMessage });
+
+          const model = project?.model || DEFAULT_MODEL_ID;
+          if (!isAllowedModel(model)) {
+            throw new HttpException('invalid_model', HttpStatus.BAD_REQUEST);
+          }
 
           // Determine which key to use and enforce allowlist
           const envKey = process.env.OPENROUTER_API_KEY;
-          const usingUserKey = !!openrouterKey && PAID_MODELS.has(model);
+          const userKey = openrouterKey?.trim() ? openrouterKey.trim() : undefined;
+          const paid = isPaidModel(model);
 
-          if (PAID_MODELS.has(model) && !usingUserKey) {
+          if (paid && !userKey) {
             throw new HttpException('paid_model_requires_user_key', HttpStatus.FORBIDDEN);
           }
 
-          const key = usingUserKey ? openrouterKey! : envKey;
+          // For free models, prefer the server key but allow user key override if provided.
+          const key = paid ? userKey! : (userKey || envKey);
 
           // If no key, emit a short stub stream and persist assistant message
           if (!key) {
             const tokens = ['Thinking', '…', ' ', 'Thanks', ' ', 'for', ' ', 'your', ' ', 'message', '.'];
-            for (const t of tokens) { subscriber.next({ data: t } as any); await new Promise((r) => setTimeout(r, 60)); }
+            for (const t of tokens) {
+              if (subscriber.closed || abortedByTeardown) return;
+              subscriber.next({ data: t } as any);
+              await new Promise((r) => setTimeout(r, 60));
+            }
             await self.prisma.message.create({ data: { chatId, userId, role: 'assistant', content: tokens.join('') } });
-            subscriber.next({ data: '[DONE]' } as any);
-            subscriber.complete();
+            if (!subscriber.closed) {
+              subscriber.next({ data: '[DONE]' } as any);
+              subscriber.complete();
+            }
             return;
           }
 
           // Call OpenRouter with streaming
-          const ctrl = new AbortController();
-          const timeoutMs = Number(process.env.OPENROUTER_STREAM_TIMEOUT_MS || 60000);
-          const timeout = setTimeout(() => ctrl.abort(), timeoutMs);
+          if (subscriber.closed || abortedByTeardown) return;
+          ctrl = new AbortController();
+          timeout = setTimeout(() => ctrl?.abort(), timeoutMs);
 
           const body: any = { model, messages, stream: true };
-          if (PAID_MODELS.has(model)) {
+          if (paid) {
             body.plugins = [{ id: 'file-parser', pdf: { engine: 'native' } }]; // harmless hint for future PDF support
           }
+
+          // Log only high-level request metadata
+          self.logger.log(`CHAT: OpenRouter request - model=${model} messages=${messages.length}`);
 
           const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
             method: 'POST',
@@ -123,21 +163,25 @@ export class ChatsService {
               'X-Title': 'Kanari',
             },
             body: JSON.stringify(body),
-            signal: ctrl.signal,
+            signal: ctrl!.signal,
           });
-          clearTimeout(timeout);
 
           if (!resp.ok || !resp.body) {
             const text = await resp.text().catch(() => '');
             throw new HttpException(`openrouter_error: ${resp.status} ${text}`, HttpStatus.BAD_GATEWAY);
           }
 
-          const reader: ReadableStreamDefaultReader<Uint8Array> = (resp.body as any).getReader?.();
+          const getReader = (resp.body as any).getReader;
+          if (typeof getReader !== 'function') {
+            throw new HttpException('openrouter_stream_unsupported', HttpStatus.BAD_GATEWAY);
+          }
+          const reader: ReadableStreamDefaultReader<Uint8Array> = getReader.call(resp.body);
           const decoder = new TextDecoder('utf-8');
           let buffer = '';
           let full = '';
 
           while (true) {
+            if (subscriber.closed || abortedByTeardown || ctrl!.signal.aborted) break;
             const { value, done } = await reader.read();
             if (done) break;
             buffer += decoder.decode(value, { stream: true });
@@ -168,7 +212,7 @@ export class ChatsService {
                 if (delta) {
                   full += delta;
                   // Send string fragments; FE will handle both string and JSON formats
-                  subscriber.next({ data: delta } as any);
+                  if (!subscriber.closed) subscriber.next({ data: delta } as any);
                 }
               } catch {
                 // ignore parse errors (keep-alive)
@@ -176,17 +220,28 @@ export class ChatsService {
             }
           }
 
-          if (full) {
+          if (full && !abortedByTeardown && !ctrl!.signal.aborted) {
             await self.prisma.message.create({ data: { chatId, userId, role: 'assistant', content: full } });
           }
           // Signal end-of-stream explicitly for FE
-          subscriber.next({ data: '[DONE]' } as any);
-          subscriber.complete();
+          if (!subscriber.closed) {
+            subscriber.next({ data: '[DONE]' } as any);
+            subscriber.complete();
+          }
         } catch (e: any) {
+          if (ctrl?.signal.aborted) {
+            if (abortedByTeardown || subscriber.closed) return;
+            subscriber.error(new HttpException('openrouter_stream_timeout', HttpStatus.GATEWAY_TIMEOUT));
+            return;
+          }
           self.logger.error('stream_error', e);
-          subscriber.error(e);
+          if (!subscriber.closed) subscriber.error(e);
+        } finally {
+          if (timeout) clearTimeout(timeout);
         }
       })();
+
+      return teardown;
     });
   }
 }

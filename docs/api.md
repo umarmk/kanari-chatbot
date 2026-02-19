@@ -20,12 +20,13 @@ Security:
 
 Environment:
 
+- `DATABASE_URL` (required; Postgres connection string)
 - `JWT_ACCESS_SECRET` (required)
 - `SESSION_SIGNING_KEY` (cookies for Google PKCE; dev default used if unset)
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` (optional but needed for Google)
 - `GATEWAY_PUBLIC_URL` (default: http://localhost:3000)
-- `WEB_URL` (default: http://localhost:5173)
-- `OPENROUTER_API_KEY` (optional; if omitted, stub streaming is used unless client provides `x-openrouter-key`)
+- `WEB_URL` (default: http://localhost:5173; comma-separated allowed for CORS; first entry used for OAuth redirect base)
+- `OPENROUTER_API_KEY` (optional; used for free models. Paid models require client `x-openrouter-key`)
 - `OPENROUTER_STREAM_TIMEOUT_MS` (optional; default 60000)
 - `FILE_MAX_BYTES` (optional; default 20971520)
 
@@ -46,7 +47,7 @@ Request
 }
 ```
 
-Response 200
+Response 201
 
 ```json
 {
@@ -102,7 +103,7 @@ Request
 { "refresh_token": "<uuid>.<suffix>" }
 ```
 
-Response 200
+Response 201
 
 ```json
 { "access_token": "<jwt>", "refresh_token": "<uuid>.<new_suffix>" }
@@ -111,7 +112,6 @@ Response 200
 Errors
 
 - 401 invalid_refresh_token (malformed, not found, hash mismatch)
-- 401 session_expired
 
 Notes
 
@@ -147,7 +147,7 @@ Redirects the browser to Google for consent.
 
 Query params
 
-- `redirect` (optional): absolute URL to route to after callback (defaults to `WEB_URL`)
+- `redirect` (optional): same-origin relative path (must start with `/`, e.g. `/auth/callback`); absolute URLs are ignored.
 
 Behavior
 
@@ -173,7 +173,7 @@ Behavior
 4. Upserts user and oauth account
 5. Issues `{access_token, refresh_token}`
 6. Clears g\_\* cookies, then redirects to SPA with tokens in URL fragment:
-   - `{WEB_URL}/auth/callback#access_token=...&refresh_token=...`
+   - `{WEB_URL}<redirectPath>#access_token=...&refresh_token=...` (default: `/auth/callback`)
 
 Errors
 
@@ -189,6 +189,25 @@ Notes
 
 ---
 
+## Models
+
+### GET /models
+
+Returns the backend allowlist of models and the default model id.
+
+Response 200
+
+```json
+{
+  "models": [
+    { "id": "deepseek/deepseek-chat-v3.1:free", "label": "DeepSeek Chat v3.1 (Free)", "access": "free" }
+  ],
+  "default_model": "deepseek/deepseek-chat-v3.1:free"
+}
+```
+
+---
+
 ## Projects
 
 All endpoints require `Authorization: Bearer <access_token>`.
@@ -197,24 +216,26 @@ All endpoints require `Authorization: Bearer <access_token>`.
 
 Create a project.
 
+Model ids are allowlisted; unknown ids return `400 invalid_model`. Use `GET /models` to fetch supported ids.
+
 Request
 
 ```json
 {
   "name": "My Project",
   "system_prompt": "You are helpful",
-  "model": "x-ai/grok-4-fast:free",
+  "model": "deepseek/deepseek-chat-v3.1:free",
   "params": {}
 }
 ```
 
-Response 200
+Response 201
 
 ```json
 {
   "id": "<uuid>",
   "name": "My Project",
-  "model": "x-ai/grok-4-fast:free",
+  "model": "deepseek/deepseek-chat-v3.1:free",
   "createdAt": "..."
 }
 ```
@@ -233,7 +254,7 @@ Update fields: `{ name?, system_prompt?, model?, params? }`.
 
 ### DELETE /projects/:id
 
-Delete project (cascades chats/files by schema rules).
+Delete project (cascades chats/files by schema rules). Gateway also best-effort deletes uploaded files from disk to avoid orphans.
 
 ---
 
@@ -296,10 +317,10 @@ Append a user message (non-stream). Body: `{ "content": string }`.
 
 Server-Sent Events (SSE) streaming of the assistant reply for the provided prompt.
 
-- Headers: `Authorization: Bearer ...`, `Accept: text/event-stream`, optional `x-openrouter-key: <token>` for paid models.
+- Headers: `Authorization: Bearer ...`, `Accept: text/event-stream`. Paid models require `x-openrouter-key: <token>` (free models may optionally use it as an override).
 - Stream format: plain text fragments in SSE lines: `data: <text>`; terminates with `data: [DONE]`.
 - On success, the full assistant message is persisted after stream ends.
-- If neither `OPENROUTER_API_KEY` nor `x-openrouter-key` is provided, a short stub stream is emitted for local dev.
+- If model is free and neither `OPENROUTER_API_KEY` nor `x-openrouter-key` is provided, a short stub stream is emitted for local dev. Paid models require `x-openrouter-key` and will return 403 `paid_model_requires_user_key` if missing.
 - Throttling: endpoint-specific limit ~20 requests / 60s per user/IP.
 
 Note: Timeout/abort is applied server-side. Client may cancel by closing connection.

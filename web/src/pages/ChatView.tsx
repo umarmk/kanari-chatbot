@@ -104,11 +104,23 @@ export default function ChatView() {
     abortRef.current = ctrl;
 
     try {
+      // SSE stream: parse `data:` lines and accumulate fragments into a single assistant message.
       const headers: any = { Authorization: `Bearer ${accessToken}`, Accept: 'text/event-stream' };
       if (openrouterKey) headers['x-openrouter-key'] = openrouterKey;
       const resp = await fetch(url, { headers, signal: ctrl.signal });
-      if (!resp.ok || !resp.body) throw new Error('stream_failed');
+      if (!resp.ok) {
+        // Prefer backend error message to a generic stream_failed.
+        const text = await resp.text().catch(() => '');
+        let msg = text || `stream_failed (${resp.status})`;
+        try {
+          const parsed = JSON.parse(text);
+          msg = parsed?.message || msg;
+        } catch {}
+        throw new Error(msg);
+      }
+      if (!resp.body) throw new Error('stream_failed');
       const reader = (resp.body as any).getReader?.();
+      if (!reader) throw new Error('stream_unsupported');
       const decoder = new TextDecoder('utf-8');
       let buffer = '';
       let acc = '';
@@ -400,4 +412,3 @@ export default function ChatView() {
     </div>
   );
 }
-

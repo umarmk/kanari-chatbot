@@ -12,8 +12,6 @@ dist/
 
 # Env & secrets
 .env
-.env.*.local
-!.env.example
 
 # Logs
 npm-debug.log*
@@ -27,10 +25,7 @@ yarn-error.log*
 # Misc
 *.swp
 *.swo
-instructions.md
 chatbotrequirements.md
-docs/progress.md
-docs/api.md
 
 # Local uploads (runtime artifacts)
 apps/gateway/uploads/

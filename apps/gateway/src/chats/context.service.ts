@@ -4,7 +4,7 @@ import { promises as fs } from 'fs';
 import * as path from 'path';
 import pdf from 'pdf-parse';
 
-// Minimal, dependency-free file context builder for Stage 3
+// Minimal, dependency-free file context builder 
 // - Reads text-like files from uploads/ and extracts text from PDFs
 // - Splits into rough chunks
 // - Ranks by simple token overlap against the query and recent messages
@@ -40,11 +40,14 @@ export class ContextService {
 
     // Load file records
     const files = await this.prisma.file.findMany({ where: { projectId }, orderBy: { createdAt: 'desc' }, take: 50 });
+    this.logger.log(`RAG: Found ${files.length} files for project ${projectId}`);
+
     const candidates: Array<{ fileId: string; name: string; chunk: string; idx: number; score: number }> = [];
 
     for (const f of files) {
       try {
         const abs = path.resolve(process.cwd(), f.storageUrl);
+        this.logger.log(`RAG: Processing file ${f.name} (${f.mime}) at ${abs}`);
 
         let raw: string | null = null;
         if (f.mime === 'application/pdf') {
@@ -53,7 +56,9 @@ export class ContextService {
             const buf = await fs.readFile(abs);
             const res = await pdf(buf);
             raw = (res?.text || '').trim();
-          } catch {
+            this.logger.log(`RAG: Extracted ${raw.length} chars from PDF ${f.name}`);
+          } catch (err) {
+            this.logger.warn(`RAG: Failed to extract PDF ${f.name}: ${err}`);
             raw = null;
           }
         } else {
@@ -61,35 +66,59 @@ export class ContextService {
           const isText = f.mime.startsWith('text/') || f.mime === 'application/json' || f.mime === 'application/xml' || f.mime === 'application/javascript';
           if (isText) {
             raw = await fs.readFile(abs, 'utf8');
+            this.logger.log(`RAG: Read ${raw.length} chars from text file ${f.name}`);
+          } else {
+            this.logger.log(`RAG: Skipping unsupported mime type ${f.mime} for ${f.name}`);
           }
         }
 
         if (!raw) continue; // skip unsupported/failed
 
         const chunks = this.chunkText(raw);
+        this.logger.log(`RAG: Created ${chunks.length} chunks from ${f.name}`);
+
         for (let i = 0; i < chunks.length; i++) {
           const ctoks = tokenize(chunks[i]);
           const sc = scoreChunk(queryTokens, ctoks);
-          if (sc > 0) candidates.push({ fileId: f.id, name: f.name, chunk: chunks[i], idx: i + 1, score: sc });
+          // ALWAYS add chunks, even with score 0, so generic questions like "what's in this file?" work
+          candidates.push({ fileId: f.id, name: f.name, chunk: chunks[i], idx: i + 1, score: sc });
+          if (sc > 0) {
+            this.logger.log(`RAG: Chunk ${i + 1} of ${f.name} scored ${sc}`);
+          }
         }
       } catch (e) {
-        this.logger.warn(`failed_to_read_file ${f.id} ${f.name}`);
+        this.logger.warn(`RAG: Failed to read file ${f.id} ${f.name}: ${e}`);
       }
     }
 
-    if (!candidates.length) return null;
+    if (!candidates.length) {
+      this.logger.log('RAG: No chunks found (no files in project)');
+      return null;
+    }
 
+    // Sort by score (highest first), but include even zero-scored chunks
     candidates.sort((a, b) => b.score - a.score);
     const top = candidates.slice(0, MAX_CHUNKS);
+    this.logger.log(`RAG: Selected top ${top.length} chunks (scores: ${top.map(c => c.score).join(', ')})`);
 
-    // Compose context block with citations
+    // Compose context block - direct format since it's prepended to user message
     const lines: string[] = [];
-    lines.push('You have access to the following project files. Use them to answer. Cite like [file:NAME#CHUNK].\n');
+    lines.push('[CONTEXT: The following are excerpts from files in your project]');
+    lines.push('');
+
     for (const c of top) {
       const chunk = c.chunk.slice(0, MAX_CHARS_PER_CHUNK);
-      lines.push(`[file:${c.name}#${c.idx}]\n${chunk}\n`);
+      lines.push(`File: ${c.name} (Part ${c.idx})`);
+      lines.push(chunk);
+      lines.push('');
     }
-    return lines.join('\n');
+
+    lines.push('[END OF CONTEXT]');
+    lines.push('');
+
+    const context = lines.join('\n');
+    this.logger.log(`RAG: Built context with ${context.length} chars from ${top.length} chunks`);
+    return context;
   }
 
   private chunkText(raw: string): string[] {
@@ -108,4 +137,3 @@ export class ContextService {
     return out;
   }
 }
-

@@ -1,5 +1,8 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { promises as fs } from 'fs';
+import * as path from 'path';
+import { DEFAULT_MODEL_ID, isAllowedModel } from '../chats/models';
 
 export interface CreateProjectInput {
   name: string;
@@ -15,19 +18,21 @@ export interface UpdateProjectInput {
   params?: Record<string, any> | null;
 }
 
-const DEFAULT_MODEL = 'deepseek/deepseek-chat-v3.1:free';
-
 @Injectable()
 export class ProjectsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  // Create a project owned by the current user.
+  // Model is validated against the backend allowlist to avoid key misuse and FE/BE drift.
   async create(userId: string, dto: CreateProjectInput) {
+    const model = dto.model ?? DEFAULT_MODEL_ID;
+    if (model && !isAllowedModel(model)) throw new BadRequestException('invalid_model');
     return this.prisma.project.create({
       data: {
         userId,
         name: dto.name,
         systemPrompt: dto.system_prompt ?? null,
-        model: dto.model ?? DEFAULT_MODEL,
+        model,
         params: (dto.params as any) ?? undefined,
       },
     });
@@ -46,6 +51,10 @@ export class ProjectsService {
 
   async patch(userId: string, id: string, dto: UpdateProjectInput) {
     await this.ensureOwnership(userId, id);
+    // Reject unknown models early (prevents paid-model server key usage and keeps UX consistent).
+    if (dto.model !== undefined && dto.model !== null && !isAllowedModel(dto.model)) {
+      throw new BadRequestException('invalid_model');
+    }
     return this.prisma.project.update({
       where: { id },
       data: {
@@ -59,7 +68,16 @@ export class ProjectsService {
 
   async remove(userId: string, id: string) {
     await this.ensureOwnership(userId, id);
+    // Best-effort disk cleanup for uploaded files to prevent orphaned blobs when DB rows cascade-delete.
+    // We capture the list before deleting the project row, then unlink afterwards.
+    const files = await this.prisma.file.findMany({ where: { projectId: id }, select: { storageUrl: true } });
     await this.prisma.project.delete({ where: { id } });
+    await Promise.all(
+      files.map(async (f) => {
+        const absPath = path.resolve(process.cwd(), f.storageUrl);
+        await fs.unlink(absPath).catch(() => undefined);
+      }),
+    );
     return { success: true };
   }
 
