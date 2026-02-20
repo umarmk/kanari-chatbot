@@ -223,7 +223,7 @@ Request
 ```json
 {
   "name": "My Project",
-  "system_prompt": "You are helpful",
+  "system_prompt": "You are helpful a helpful assistant",
   "model": "deepseek/deepseek-chat-v3.1:free",
   "params": {}
 }
